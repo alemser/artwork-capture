@@ -118,8 +118,46 @@ python -m pytest tests/
 - Rode em background com `nice`.
 
 ### Problema: Não roda em boot
-- Adicione ao crontab: `@reboot cd /path/to/project && source venv/bin/activate && nohup python src/main.py &`
-- Ou crie um serviço systemd.
+
+#### Opção 1 — Crontab (rápido)
+1. Abra o crontab do usuário (geralmente `pi` no Raspbian/Moode):
+   ```bash
+   crontab -e
+   ```
+2. Adicione esta linha (ajuste o caminho para o seu projeto):
+   ```bash
+   @reboot cd /path/to/project && source venv/bin/activate && nohup python src/main.py &
+   ```
+
+#### Opção 2 — Serviço systemd (recomendado)
+1. Crie um arquivo de serviço como `/etc/systemd/system/artwork-capture.service` (use sudo):
+   ```ini
+   [Unit]
+   Description=Artwork Capture
+   After=network.target
+
+   [Service]
+   Type=simple
+   WorkingDirectory=/path/to/project
+   Environment=ACOUSTID_API_KEY=your_acoustid_api_key
+   ExecStart=/path/to/project/venv/bin/python /path/to/project/src/main.py
+   Restart=on-failure
+   User=pi
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+2. Habilite e inicie o serviço:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable artwork-capture.service
+   sudo systemctl start artwork-capture.service
+   ```
+3. Verifique o status/logs:
+   ```bash
+   sudo systemctl status artwork-capture.service
+   sudo journalctl -u artwork-capture.service -f
+   ```
 
 ### Logs
 - Logs são salvos no console. Para arquivo: `python src/main.py > log.txt 2>&1 &`
