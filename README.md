@@ -58,7 +58,7 @@ Este projeto captura áudio de um microfone em um Raspberry Pi rodando Moode ou 
 
 ## Configuração
 
-Edite `src/main.py` para ajustar:
+Edite `src/artwork_capture.py` para ajustar:
 - `MIC_DEVICE_INDEX`: Índice do dispositivo de microfone (use `python3 -c "import pyaudio; p = pyaudio.PyAudio(); [print(f'{i}: {p.get_device_info_by_index(i)[\"name\"]}') for i in range(p.get_device_count())]"` para listar dispositivos).
 - `DISPLAY_WIDTH` e `DISPLAY_HEIGHT`: Resolução da tela.
 - `STOP_UI_CMD` e `START_UI_CMD`: Comandos para parar/iniciar a UI do player.
@@ -74,7 +74,7 @@ Edite `src/main.py` para ajustar:
 3. Rode o script em background:
    ```
    source venv/bin/activate
-   nohup python src/main.py &
+   nohup python src/artwork_capture.py &
    ```
 4. O script monitora automaticamente:
    - Se MPD estiver tocando (streaming), pula o processamento.
@@ -101,7 +101,7 @@ python -m pytest tests/
 
 ### Problema: Display não funciona ou conflita
 - Para tela única: confirme que `STOP_UI_CMD` e `START_UI_CMD` estão corretos.
-- Rode com sudo se necessário: `sudo -E python src/main.py` (preserva env vars).
+- Rode com sudo se necessário: `sudo -E python src/artwork_capture.py` (preserva env vars).
 - Se pygame falhar, verifique se a tela suporta gráficos (use HDMI com saída gráfica).
 
 ### Problema: Fingerprinting falha
@@ -126,7 +126,7 @@ python -m pytest tests/
    ```
 2. Adicione esta linha (ajuste o caminho para o seu projeto):
    ```bash
-   @reboot cd /path/to/project && source venv/bin/activate && nohup python src/main.py &
+   @reboot cd /path/to/project && source venv/bin/activate && nohup python src/artwork_capture.py &
    ```
 
 #### Opção 2 — Serviço systemd (recomendado)
@@ -140,7 +140,7 @@ python -m pytest tests/
    Type=simple
    WorkingDirectory=/path/to/project
    Environment=ACOUSTID_API_KEY=your_acoustid_api_key
-   ExecStart=/path/to/project/venv/bin/python /path/to/project/src/main.py
+   ExecStart=/path/to/project/venv/bin/python /path/to/project/src/artwork_capture.py
    Restart=on-failure
    User=pi
 
@@ -160,7 +160,7 @@ python -m pytest tests/
    ```
 
 ### Logs
-- Logs são salvos no console. Para arquivo: `python src/main.py > log.txt 2>&1 &`
+- Logs são salvos no console. Para arquivo: `python src/artwork_capture.py > log.txt 2>&1 &`
 - Nível de log: INFO por padrão; mude para DEBUG em `logging.basicConfig(level=logging.DEBUG)`.
 
 Se problemas persistirem, verifique os logs e poste no repositório com detalhes do erro.

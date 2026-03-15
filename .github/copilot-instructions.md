@@ -5,7 +5,7 @@
 	Project type: Python project for audio fingerprinting and artwork display
 
 - [x] Scaffold the Project
-	Created src/, tests/, README.md, requirements.txt, .gitignore, main.py
+	Created src/, tests/, README.md, requirements.txt, .gitignore, artwork_capture.py
 
 - [x] Customize the Project
 	Basic implementation completed
@@ -17,7 +17,7 @@
 	Installed dependencies in venv
 
 - [x] Create and Run Task
-	Created task to run main.py
+	Created task to run artwork_capture.py
 
 - [x] Launch the Project
 	Task created, but requires MPD on Pi and API key

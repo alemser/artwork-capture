@@ -7,7 +7,7 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from main import has_audio, fingerprint_audio, get_metadata, get_artwork
+from artwork_capture import has_audio, fingerprint_audio, get_metadata, get_artwork
 
 class TestArtworkCapture(unittest.TestCase):
 
