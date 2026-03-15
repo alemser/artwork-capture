@@ -1,0 +1,5 @@
+pyaudio
+pyacoustid
+requests
+pygame
+python-mpd2
