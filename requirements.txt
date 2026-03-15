@@ -3,3 +3,4 @@ pyacoustid
 requests
 pygame
 python-mpd2
+pytest

@@ -18,8 +18,13 @@ This project aims to capture audio from a microphone on a Raspberry Pi running M
 
 ## Installation
 1. Clone this repository on your Raspberry Pi.
-2. Install dependencies: `pip install -r requirements.txt`
-3. Run the main script: `python src/main.py`
+2. Create and activate a virtual environment: `python3 -m venv venv && source venv/bin/activate`
+3. Install dependencies: `pip install -r requirements.txt`
+4. Set the AcoustID API key: `export ACOUSTID_API_KEY=0cAcPUvHVU`
+5. Run the main script: `python src/main.py`
+
+## Testing
+Run tests with: `python -m pytest tests/`
 
 ## Usage
 Connect the microphone and display. Run the script in the background: `source venv/bin/activate && python src/main.py &`
