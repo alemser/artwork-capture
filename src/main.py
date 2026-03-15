@@ -8,6 +8,7 @@ import time
 import os
 import logging
 import tempfile
+import subprocess
 
 # Configuration
 MIC_DEVICE_INDEX = 0  # Adjust based on your setup
@@ -19,6 +20,10 @@ RECORD_SECONDS = 10  # Record 10 seconds for fingerprinting
 API_KEY = os.environ.get('ACOUSTID_API_KEY', 'your_acoustid_api_key')  # Set via export ACOUSTID_API_KEY=...
 DISPLAY_WIDTH = 800
 DISPLAY_HEIGHT = 480
+
+# Commands to stop/start UI (adjust for your player)
+STOP_UI_CMD = ["sudo", "systemctl", "stop", "lighttpd"]  # For Moode (lighttpd web server)
+START_UI_CMD = ["sudo", "systemctl", "start", "lighttpd"]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -98,6 +103,11 @@ def get_artwork(recording):
 
 def display_image(image_data):
     try:
+        # Stop UI to free the display
+        logger.info("Stopping UI to access display")
+        subprocess.run(STOP_UI_CMD, check=True)
+        time.sleep(2)  # Wait for UI to stop
+
         screen = pygame.display.set_mode((DISPLAY_WIDTH, DISPLAY_HEIGHT))
         pygame.display.set_caption("Album Artwork")
 
@@ -118,8 +128,17 @@ def display_image(image_data):
                     running = False
 
         pygame.display.quit()
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to stop UI: {e}")
     except Exception as e:
         logger.error(f"Error displaying image: {e}")
+    finally:
+        # Restart UI
+        try:
+            logger.info("Restarting UI")
+            subprocess.run(START_UI_CMD, check=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to start UI: {e}")
 
 def has_audio(audio_data):
     # Check if the audio has significant sound

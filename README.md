@@ -26,6 +26,12 @@ This project aims to capture audio from a microphone on a Raspberry Pi running M
 ## Testing
 Run tests with: `python -m pytest tests/`
 
+## Configuration
+- Adjust `MIC_DEVICE_INDEX` for your microphone.
+- Set display resolution: `DISPLAY_WIDTH`, `DISPLAY_HEIGHT`.
+- For single screen with Moode/Volumio UI: Update `STOP_UI_CMD` and `START_UI_CMD` to stop/start the web server (e.g., lighttpd for Moode, nginx for Volumio). Run the script with sudo if needed for systemctl commands.
+- Example for Moode: `STOP_UI_CMD = ["sudo", "systemctl", "stop", "lighttpd"]`
+
 ## Usage
 Connect the microphone and display. Run the script in the background: `source venv/bin/activate && python src/main.py &`
 
@@ -33,5 +39,7 @@ The script automatically detects playback mode:
 - When streaming via AirPlay or UPnP (MPD playing), it skips processing.
 - When playing analog sources (vinyl/CD), it captures audio, fingerprints, and displays artwork.
 - Avoids processing when no audio is detected.
+
+The script stops the UI temporarily to access the display and restarts it after showing the artwork.
 
 Adjust `MIC_DEVICE_INDEX`, `DISPLAY_WIDTH`, `DISPLAY_HEIGHT`, and audio threshold in the code as needed.
