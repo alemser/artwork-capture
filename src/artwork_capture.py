@@ -172,7 +172,7 @@ class MoodeAudioMonitor:
             data = json.loads(result.stdout)
 
             fingerprint = data.get("fingerprint")
-            duration = data.get("duration")
+            # duration = data.get("duration")
 
             if not fingerprint:
                 logger.error("Fingerprint não gerado.")
@@ -186,7 +186,7 @@ class MoodeAudioMonitor:
                 "format": "json",
                 "client": API_KEY,
                 "fingerprint": fingerprint,
-                "duration": duration,
+                "duration": RECORD_SECONDS,
                 "meta": "recordings releasegroups releases tracks",
                 "fuzzy": 1
             }
