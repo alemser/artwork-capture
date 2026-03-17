@@ -14,11 +14,11 @@ from scipy import signal
 
 # --- CONFIGURAÇÕES ---
 MIC_DEVICE_INDEX = 3
-RECORD_SECONDS = 30 # Aumentado para dar mais margem ao AcoustID
+RECORD_SECONDS = 30 
 API_KEY = os.environ.get("ACOUSTID_API_KEY", "your_acoustid_api_key")
 
 DISPLAY_RES = (800, 480)
-CHECK_INTERVAL = 10
+CHECK_INTERVAL = 5 # Reduzido para processar mais rápido entre tentativas
 THRESHOLD_RATIO = 0.02
 
 logging.basicConfig(
@@ -67,7 +67,7 @@ class MoodeAudioMonitor:
         fd, path = tempfile.mkstemp(suffix=".wav", prefix="moode_rec_")
         os.close(fd) 
 
-        # Alterado para 48000Hz como prioridade para evitar áudio lento
+        # Forçamos 48000Hz pois o teste mostrou que a placa grava mais lento em 44.1k
         configs = [
             ["-c", "1", "-r", "48000"],
             ["-c", "1", "-r", "44100"]
@@ -88,17 +88,17 @@ class MoodeAudioMonitor:
     def is_music(self, path):
         try:
             with wave.open(path, "rb") as wf:
+                params = wf.getparams()
                 n_frames = wf.getnframes()
                 data = np.frombuffer(wf.readframes(n_frames), dtype=np.int16).copy()
                 if len(data) == 0: return False
-                # Simplificação para mono/stereo
-                if wf.getnchannels() > 1:
-                    data = data.reshape(-1, wf.getnchannels()).mean(axis=1).astype(np.int16)
+                if params.nchannels > 1:
+                    data = data.reshape(-1, params.nchannels).mean(axis=1).astype(np.int16)
 
             max_amp = np.max(np.abs(data))
             if max_amp < 500: return False
 
-            freqs, psd = signal.welch(data, fs=wf.getframerate())
+            freqs, psd = signal.welch(data, fs=params.framerate)
             music_ratio = np.sum(psd > (np.max(psd) * 0.01)) / len(psd)
             logger.info(f"DSP Check: Amp={max_amp} | Ratio={music_ratio:.4f}")
             return music_ratio > THRESHOLD_RATIO
@@ -107,11 +107,15 @@ class MoodeAudioMonitor:
             return False
 
     def get_artwork(self, path):
-        if not API_KEY or API_KEY == "your_acoustid_api_key": return None
+        if not API_KEY or API_KEY == "your_acoustid_api_key":
+            logger.error("API Key ausente.")
+            return None
+            
         trimmed = path + "_trim.wav"
         try:
-            # CORREÇÃO CRÍTICA: rate 16k corrige a velocidade lenta antes de enviar
-            logger.info("A corrigir velocidade e a limpar áudio...")
+            # CORREÇÃO DE VELOCIDADE: 'rate 16k' normaliza o tom da Sade
+            # FILTRO: highpass/lowpass foca na música e ignora ruído ambiente
+            logger.info("Processando áudio (Resample 16k + Filtros)...")
             subprocess.run([
                 "sox", "-q", path, trimmed, 
                 "remix", "1", 
@@ -119,11 +123,12 @@ class MoodeAudioMonitor:
                 "highpass", "200", 
                 "lowpass", "6000", 
                 "norm", "-1", 
-                "trim", "5", "15"
+                "trim", "5", "18" # Pega 13 segundos de amostra
             ], check=True)
 
-            # Opcional: guardar cópia para teste manual
-            subprocess.run(["cp", trimmed, os.path.join(os.path.expanduser("~"), "test_ident.wav")])
+            # Salva cópia local para você conferir se o som ficou normal
+            teste_path = os.path.join(os.path.expanduser("~"), "test_ident.wav")
+            subprocess.run(["cp", trimmed, teste_path])
 
             cmd = ["fpcalc", "-json", trimmed]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
@@ -136,19 +141,26 @@ class MoodeAudioMonitor:
                 "fingerprint": fp_data.get("fingerprint"),
                 "duration": int(fp_data.get("duration")),
                 "meta": "recordings releasegroups",
-                "fuzzy": 1 
+                "fuzzy": 2 # Aumentado para ser mais tolerante com capturas de mic
             }
 
             resp = self.session.post(url, data=payload, timeout=15)
             response = resp.json()
             
-            if response.get("status") == "ok" and response.get("results"):
-                results = [r for r in response["results"] if r.get("score", 0) > 0.05]
-                if results:
-                    best = max(results, key=lambda x: x.get("score", 0))
+            status = response.get("status")
+            results = response.get("results", [])
+            logger.info(f"AcoustID Status: {status} | Resultados: {len(results)}")
+
+            if status == "ok" and results:
+                # Filtro de score baixo para compensar perda acústica do ar
+                valid_results = [r for r in results if r.get("score", 0) > 0.05]
+                if valid_results:
+                    best = max(valid_results, key=lambda x: x.get("score", 0))
                     track = best["recordings"][0]
                     title = track.get("title", "Desconhecido")
-                    logger.info(f"🎯 IDENTIFICADO: {title} ({int(best.get('score')*100)}%)")
+                    score_perc = int(best.get("score") * 100)
+                    
+                    logger.info(f"🎯 IDENTIFICADO: {title} ({score_perc}%)")
 
                     rgs = track.get("releasegroups", [])
                     if rgs:
@@ -157,9 +169,10 @@ class MoodeAudioMonitor:
                         img_res = self.session.get(art_url, timeout=10)
                         if img_res.status_code == 200:
                             return {"title": title, "img": img_res.content}
+            
             return None
         except Exception as e:
-            logger.error(f"Erro AcoustID: {e}")
+            logger.error(f"Erro no Lookup: {e}")
             return None
         finally:
             if os.path.exists(trimmed): os.unlink(trimmed)
@@ -172,22 +185,32 @@ class MoodeAudioMonitor:
             img = pygame.image.load(io.BytesIO(art_data["img"]))
             screen.blit(pygame.transform.scale(img, DISPLAY_RES), (0, 0))
             pygame.display.flip()
-            logger.info(f"A exibir: {art_data['title']}")
-            time.sleep(30)
+            logger.info(f"Display: Exibindo capa de {art_data['title']}")
+            time.sleep(25) # Tempo de exibição
+        except Exception as e:
+            logger.error(f"Erro Display: {e}")
         finally:
             pygame.display.quit()
 
     def start(self):
-        logger.info("Monitor Iniciado.")
+        logger.info("Monitor Moode Iniciado (Modo Microfone/Resample).")
         while True:
-            if self.should_scan_analog():
-                path = self.record_audio()
-                if path:
-                    if self.is_music(path):
-                        art = self.get_artwork(path)
-                        if art: self.display_image(art)
-                    if os.path.exists(path): os.unlink(path)
-            time.sleep(CHECK_INTERVAL)
+            try:
+                if self.should_scan_analog():
+                    path = self.record_audio()
+                    if path:
+                        if self.is_music(path):
+                            art = self.get_artwork(path)
+                            if art:
+                                self.display_image(art)
+                        
+                        if os.path.exists(path): os.unlink(path)
+                
+                time.sleep(CHECK_INTERVAL)
+            except KeyboardInterrupt: break
+            except Exception as e:
+                logger.error(f"Erro Loop: {e}")
+                time.sleep(5)
 
 if __name__ == "__main__":
     monitor = MoodeAudioMonitor()
