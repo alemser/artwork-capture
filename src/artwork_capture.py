@@ -141,8 +141,8 @@ class MoodeAudioMonitor:
             subprocess.run([
                 "sox", "-q", path, trimmed, 
                 "remix", "1", 
-                "highpass", "300", 
-                "lowpass", "4000", 
+                "highpass", "200", 
+                "lowpass", "8000", 
                 "norm", "-1", 
                 "trim", "5", "15"
             ], check=True)
@@ -170,6 +170,7 @@ class MoodeAudioMonitor:
             # POST é obrigatório para fingerprints longos
             resp = self.session.post(url, data=payload, timeout=15)
             response = resp.json()
+            logger.info(f"Resposta API: {response.get('status')} - Resultados: {len(response.get('results', []))}")
 
             if response.get("status") == "ok" and response.get("results"):
                 # Score reduzido para 0.05 para compensar a perda de qualidade do microfone
