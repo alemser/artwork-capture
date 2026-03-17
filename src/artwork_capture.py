@@ -11,19 +11,17 @@ import pygame
 from mpd import MPDClient, ConnectionError
 from scipy import signal
 
-# --- CONFIGURAÇÕES ---
+# --- CONFIGURACOES ---
 MIC_DEVICE_INDEX = 3
 RECORD_SECONDS = 10
-# Substitua pela sua chave real ou defina a variável de ambiente
 API_KEY = os.environ.get('ACOUSTID_API_KEY', 'your_acoustid_api_key') 
 DISPLAY_RES = (800, 480)
-CHECK_INTERVAL = 20  # Reduzi para checar mais rápido
-THRESHOLD_RATIO = 0.15  # Ajustado de 0.30 para 0.15 (mais sensível para o seu Rega)
+CHECK_INTERVAL = 20
+THRESHOLD_RATIO = 0.15 
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[logging.FileHandler('artwork_capture.log'), logging.StreamHandler()]
+    format='%(asctime)s [%(levelname)s] %(message)s'
 )
 logger = logging.getLogger(__name__)
 
@@ -34,49 +32,36 @@ class MoodeAudioMonitor:
         self.mpd_connected = False
 
     def connect_mpd(self):
-        """Tenta conectar ao MPD com timeout curto para não travar"""
         try:
             self.client.timeout = 5
             self.client.connect("localhost", 6600)
             self.mpd_connected = True
-            logger.info("Conectado ao MPD do Moode.")
-        except Exception as e:
-            logger.debug(f"Aguardando MPD ficar disponível... {e}")
+            logger.info("Conectado ao MPD.")
+        except Exception:
             self.mpd_connected = False
 
     def should_scan_analog(self):
-        """Verifica se o MPD está ocioso para permitir o scan do Vinil"""
         try:
             if not self.mpd_connected:
                 self.connect_mpd()
-            
             status = self.client.status()
-            state = status.get('state')
-            
-            # Se estiver tocando rádio/FLAC/Spotify no Moode, não faz o scan
-            if state == 'play':
-                # Se houver uma música com título, é streaming digital
+            if status.get('state') == 'play':
                 song = self.client.currentsong()
                 if song and 'title' in song:
-                    logger.debug("MPD tocando música digital. Ignorando analógico.")
                     return False
-            
-            return True # MPD parado, pausado ou em 'play' vazio (comum no Moode)
+            return True
         except (ConnectionError, Exception):
             self.mpd_connected = False
             return True
 
     def record_audio(self):
-        """Captura áudio do hardware ALSA"""
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
             path = tmp.name
-
         cmd = [
             'arecord', '-D', f'hw:{MIC_DEVICE_INDEX},0', 
             '-f', 'S16_LE', '-c', '1', '-r', '44100', 
             '-d', str(RECORD_SECONDS), path
         ]
-        
         try:
             subprocess.run(cmd, capture_output=True, timeout=RECORD_SECONDS + 2)
             return path
@@ -85,4 +70,67 @@ class MoodeAudioMonitor:
             return None
 
     def is_music(self, path):
-        """Analisa se o sinal grav
+        try:
+            with wave.open(path, 'rb') as wf:
+                data = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+            max_amp = np.max(np.abs(data))
+            freqs, psd = signal.welch(data, fs=44100)
+            music_ratio = np.sum(psd > (np.max(psd) * 0.01)) / len(psd)
+            logger.info(f"Sinal: Amp={max_amp} | Ratio={music_ratio:.4f}")
+            return music_ratio > THRESHOLD_RATIO
+        except Exception as e:
+            logger.error(f"Erro no DSP: {e}")
+            return False
+
+    def get_artwork(self, path):
+        try:
+            duration, fp = acoustid.fingerprint_file(path)
+            res = acoustid.lookup(API_KEY, fp, duration)
+            if res['results']:
+                recs = res['results'][0].get('recordings', [])
+                if recs:
+                    title = recs[0].get('title')
+                    rgs = recs[0].get('releasegroups', [])
+                    if rgs:
+                        mbid = rgs[0].get('id')
+                        url = f"https://coverartarchive.org/release-group/{mbid}/front"
+                        img_res = self.session.get(url, timeout=5)
+                        if img_res.status_code == 200:
+                            return {"title": title, "img": img_res.content}
+            return None
+        except Exception as e:
+            logger.error(f"Erro AcoustID: {e}")
+            return None
+
+    def display_image(self, art_data):
+        try:
+            if not pygame.display.get_init():
+                pygame.display.init()
+            screen = pygame.display.set_mode(DISPLAY_RES)
+            import io
+            img = pygame.image.load(io.BytesIO(art_data['img']))
+            img = pygame.transform.scale(img, DISPLAY_RES)
+            screen.blit(img, (0, 0))
+            pygame.display.flip()
+            logger.info(f"Exibindo: {art_data['title']}")
+            time.sleep(25) 
+            pygame.display.quit()
+        except Exception as e:
+            logger.error(f"Erro Display: {e}")
+
+    def start(self):
+        logger.info("Monitor Analógico Iniciado.")
+        while True:
+            if self.should_scan_analog():
+                path = self.record_audio()
+                if path:
+                    if self.is_music(path):
+                        art = self.get_artwork(path)
+                        if art:
+                            self.display_image(art)
+                    os.unlink(path)
+            time.sleep(CHECK_INTERVAL)
+
+if __name__ == "__main__":
+    monitor = MoodeAudioMonitor()
+    monitor.start()
