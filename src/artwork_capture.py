@@ -101,6 +101,9 @@ class MoodeAudioMonitor:
             return None
 
         try:
+            duration, fp = acoustid.fingerprint_file(path)
+            fingerprint = fp.decode('utf-8') if isinstance(fp, bytes) else fp
+
             # Gerar fingerprint (garantindo o formato que o servidor prefere)
             cmd = ['fpcalc', '-plain', path]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -117,8 +120,10 @@ class MoodeAudioMonitor:
                 "client": API_KEY,
                 "fingerprint": fingerprint,
                 "duration": int(RECORD_SECONDS),
-                "meta": "recordings releasegroups"
+                "meta": "recordings releases releasegroups medium tracks"
             }
+
+            logger.info(f"Fingerprint gerado (prefixo): {fingerprint[:30]}...")
             
             # Usamos POST em vez de GET para evitar limites de URL
             resp = self.session.post(url, data=data, timeout=10)
