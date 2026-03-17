@@ -83,11 +83,28 @@ Edite `src/artwork_capture.py` para ajustar:
 
 ## Testes
 
-Para executar os testes:
+### Testes Unitários
+Para executar os testes unitários (mocks, sem hardware):
 ```
 source venv/bin/activate
-python -m pytest tests/
+python -m pytest tests/test_main.py -v
 ```
+
+### Testes de Integração (com Microfone e APIs)
+Antes de levar para o Pi, teste localmente com seu microfone USB conectado:
+```
+export ACOUSTID_API_KEY=sua_chave_aqui
+source venv/bin/activate
+python -m pytest tests/test_integration.py -v
+```
+
+Estes testes verificam:
+- **Microfone USB**: Listagem de dispositivos, gravação de áudio
+- **Conectividade**: AcoustID, MusicBrainz, Cover Art Archive
+- **APIs**: Lookup de fingerprints, recuperação de artwork
+- **Ciclo Completo**: Gravação → Fingerprinting → Lookup de Metadados (opcional, use música real)
+
+**Dica**: Execute `tests/test_integration.py::TestMicrophoneIntegration::test_microphone_accessible` primeiro para identificar o índice correto do seu microfone USB.
 
 ## Troubleshooting
 
