@@ -5,8 +5,9 @@ Este projeto captura áudio de um microfone em um Raspberry Pi rodando Moode, re
 ## Quick Start (TL;DR)
 
 ```bash
-# No Raspberry Pi via SSH:
-sudo apt-get update && sudo apt-get install -y python3-dev python3-pip python3-venv ffmpeg libportaudio2 portaudio19-dev git
+# No Raspberry Pi via SSH (execute cada linha separadamente):
+sudo apt-get update
+sudo apt-get install -y python3-dev python3-pip python3-venv ffmpeg libportaudio2 portaudio19-dev git
 git clone https://github.com/alemser/artwork-capture.git && cd artwork-capture
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
@@ -269,3 +270,55 @@ ffmpeg -version
 Se problemas persistirem, verifique os logs e poste no repositório com detalhes do erro.
 
 Adjust `MIC_DEVICE_INDEX`, `DISPLAY_WIDTH`, `DISPLAY_HEIGHT`, and audio threshold in the code as needed.
+
+## Desinstalação
+
+Para remover completamente o projeto e suas dependências sem deixar rastros, siga estes passos:
+
+### 1. Pare qualquer processo em execução
+- Se estiver rodando em background: `pkill -f artwork_capture.py`
+- Se usando systemd: `sudo systemctl stop artwork-capture.service && sudo systemctl disable artwork-capture.service`
+- Se usando crontab: remova a linha `@reboot` do crontab (`crontab -e`)
+
+### 2. Remova o serviço systemd (se aplicável)
+```bash
+sudo rm /etc/systemd/system/artwork-capture.service
+sudo systemctl daemon-reload
+```
+
+### 3. Remova a entrada do crontab (se aplicável)
+```bash
+crontab -e
+# Remova a linha que contém "artwork_capture.py"
+```
+
+### 4. Remova a chave da API do AcoustID
+```bash
+sed -i '/ACOUSTID_API_KEY/d' ~/.bashrc
+source ~/.bashrc
+```
+
+### 5. Remova o projeto e ambiente virtual
+```bash
+cd ..
+rm -rf artwork-capture
+```
+
+### 6. Remova arquivos de log (se criados)
+```bash
+rm -f ~/artwork_capture.log*
+```
+
+### 7. Desinstale dependências do sistema (opcional, pode afetar outros programas)
+**Atenção:** Só faça isso se não usar essas bibliotecas em outros projetos.
+```bash
+sudo apt-get remove --purge -y \
+  python3-dev \
+  ffmpeg \
+  portaudio19-dev \
+  libportaudio2
+sudo apt-get autoremove -y
+sudo apt-get autoclean
+```
+
+Após estes passos, o projeto estará completamente removido do sistema.
