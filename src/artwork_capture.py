@@ -14,7 +14,7 @@ from datetime import datetime
 import signal
 
 # Configuration
-MIC_DEVICE_INDEX = 0  # Adjust based on your setup
+MIC_DEVICE_INDEX = 1  # Adjust based on your setup (likely 1 for USB microphone)
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
