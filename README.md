@@ -1,18 +1,18 @@
 # Artwork Capture Project
 
-Este projeto captura áudio de um microfone em um Raspberry Pi rodando Moode ou Volumio, realiza fingerprinting de áudio para identificar a música tocando, busca artwork de álbuns via APIs e exibe em uma tela conectada. É totalmente automático e transparente para o usuário.
+Este projeto captura áudio de um microfone em um Raspberry Pi rodando Moode, realiza fingerprinting de áudio para identificar a música tocando, busca artwork de álbuns via APIs e exibe em uma tela conectada. É totalmente automático e transparente para o usuário.
 
 ## Funcionalidades
 - Captura de áudio via microfone USB
 - Fingerprinting de música usando AcoustID
 - Recuperação de metadados e artwork via API do MusicBrainz
 - Exibição de imagem na tela
-- Integração com players Moode/Volumio (baseados em MPD)
+- Integração com Moode Audio Player (baseado em MPD)
 - Gerenciamento automático de display único (para/ reinicia UI do player)
 
 ## Requisitos
 - Raspberry Pi 4 Model B com 8GB RAM (ou similar)
-- Moode Audio Player (versão mais recente) ou Volumio
+- Moode Audio Player (versão mais recente)
 - Microfone USB
 - Tela conectada (HDMI ou similar)
 - Python 3.7+
@@ -61,16 +61,15 @@ Este projeto captura áudio de um microfone em um Raspberry Pi rodando Moode ou 
 Edite `src/artwork_capture.py` para ajustar:
 - `MIC_DEVICE_INDEX`: Índice do dispositivo de microfone (use `python3 -c "import pyaudio; p = pyaudio.PyAudio(); [print(f'{i}: {p.get_device_info_by_index(i)[\"name\"]}') for i in range(p.get_device_count())]"` para listar dispositivos).
 - `DISPLAY_WIDTH` e `DISPLAY_HEIGHT`: Resolução da tela.
-- `STOP_UI_CMD` e `START_UI_CMD`: Comandos para parar/iniciar a UI do player.
-  - Para Moode: `["sudo", "systemctl", "stop", "lighttpd"]` e `["sudo", "systemctl", "start", "lighttpd"]`
-  - Para Volumio: `["sudo", "systemctl", "stop", "volumio"]` e `["sudo", "systemctl", "start", "volumio"]`
+- `STOP_UI_CMD` e `START_UI_CMD`: Comandos para parar/iniciar a UI do Moode.
+  - Padrão: `["sudo", "systemctl", "stop", "lighttpd"]` e `["sudo", "systemctl", "start", "lighttpd"]`
 - `RECORD_SECONDS`: Duração da gravação (10 segundos por padrão).
 - `RATE`, `CHUNK`, etc.: Ajustes de áudio se necessário.
 
 ## Uso
 
 1. Conecte o microfone USB e a tela ao Pi.
-2. Certifique-se de que o Moode/Volumio está rodando e MPD ativo na porta 6600.
+2. Certifique-se de que o Moode está rodando e MPD ativo na porta 6600.
 3. Rode o script em background:
    ```
    source venv/bin/activate
@@ -113,7 +112,7 @@ Estes testes verificam:
 - Ajuste `MIC_DEVICE_INDEX` no código.
 
 ### Problema: Erro de conexão com MPD
-- Certifique-se de que Moode/Volumio está rodando e MPD na porta 6600.
+- Certifique-se de que Moode está rodando e MPD na porta 6600.
 - Verifique logs: o script loga erros.
 
 ### Problema: Display não funciona ou conflita

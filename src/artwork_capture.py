@@ -21,8 +21,8 @@ API_KEY = os.environ.get('ACOUSTID_API_KEY', 'your_acoustid_api_key')  # Set via
 DISPLAY_WIDTH = 800
 DISPLAY_HEIGHT = 480
 
-# Commands to stop/start UI (adjust for your player)
-STOP_UI_CMD = ["sudo", "systemctl", "stop", "lighttpd"]  # For Moode (lighttpd web server)
+# Commands to stop/start Moode UI (lighttpd web server)
+STOP_UI_CMD = ["sudo", "systemctl", "stop", "lighttpd"]
 START_UI_CMD = ["sudo", "systemctl", "start", "lighttpd"]
 
 logging.basicConfig(level=logging.INFO)
