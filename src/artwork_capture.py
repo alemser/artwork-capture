@@ -284,7 +284,7 @@ def has_audio(audio_file_path):
         music_ratio = significant_bins / total_bins
         logger.info(f"Music ratio: {music_ratio:.2f} ({significant_bins}/{total_bins} bins)")
         
-        # Threshold for music: > 0.3 (adjust based on testing)
+        # Threshold for music: > 0.2 (adjust based on testing)
         return music_ratio > 0.3
     except Exception as e:
         logger.error(f"Error checking audio: {e}")
