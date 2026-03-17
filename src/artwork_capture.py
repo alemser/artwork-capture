@@ -251,15 +251,41 @@ def headless_mode(client):
 
 def has_audio(audio_file_path):
     try:
+        import wave
+        import struct
+        from scipy import signal
+        import numpy as np
+        
         with wave.open(audio_file_path, 'rb') as wf:
             frames = wf.readframes(wf.getnframes())
-        # Check if the audio has significant sound
-        import struct
-        data = struct.unpack('<' + 'h' * (len(frames) // 2), frames)
-        max_amplitude = max(abs(sample) for sample in data)
+            sample_rate = wf.getframerate()
+        
+        # Convert to numpy array
+        data = np.frombuffer(frames, dtype=np.int16)
+        if wf.getnchannels() == 2:
+            data = data.reshape(-1, 2).mean(axis=1)  # Mono
+        
+        # Amplitude check
+        max_amplitude = np.max(np.abs(data))
         logger.info(f"Max amplitude: {max_amplitude}")
-        threshold = 1000  # Adjust based on mic sensitivity
-        return max_amplitude > threshold
+        if max_amplitude < 1000:
+            return False
+        
+        # Music detection: check spectral bandwidth
+        # Compute FFT
+        freqs, psd = signal.welch(data, fs=sample_rate, nperseg=1024)
+        
+        # Find frequencies with significant power (above 1% of max)
+        max_psd = np.max(psd)
+        significant_bins = np.sum(psd > 0.01 * max_psd)
+        total_bins = len(psd)
+        
+        # Music typically has energy in more frequency bins than speech
+        music_ratio = significant_bins / total_bins
+        logger.info(f"Music ratio: {music_ratio:.2f} ({significant_bins}/{total_bins} bins)")
+        
+        # Threshold for music: > 0.3 (adjust based on testing)
+        return music_ratio > 0.3
     except Exception as e:
         logger.error(f"Error checking audio: {e}")
         return False
