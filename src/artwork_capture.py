@@ -134,17 +134,18 @@ class MoodeAudioMonitor:
 
         trimmed = path + "_trim.wav"
         try:
-            # FILTROS PARA CAPTAÇÃO VIA MICROFONE:
-            # highpass/lowpass limpam o ruído ambiente e focam na melodia.
-            # norm -1 maximiza o volume para a API 'ouvir' melhor.
-            logger.info("Processando áudio para identificação (Filtro Anti-Ruído)...")
+            # AJUSTE PARA MICROFONE (IPHONE):
+            # Abrimos o highpass para 150Hz (mais corpo) 
+            # Abrimos o lowpass para 10000Hz (mais detalhes/agudos)
+            # Isso torna o fingerprint muito mais único para a API
+            logger.info("Refinando áudio para identificação aérea...")
             subprocess.run([
                 "sox", "-q", path, trimmed, 
                 "remix", "1", 
-                "highpass", "200", 
-                "lowpass", "8000", 
+                "highpass", "150", 
+                "lowpass", "10000", 
                 "norm", "-1", 
-                "trim", "5", "15"
+                "trim", "3", "17" # Pulamos menos e pegamos um trecho maior (14s)
             ], check=True)
 
             cmd = ["fpcalc", "-json", trimmed]
@@ -163,26 +164,29 @@ class MoodeAudioMonitor:
                 "client": API_KEY,
                 "fingerprint": fingerprint,
                 "duration": int(duration),
-                "meta": "recordings releasegroups",
-                "fuzzy": 1 # Busca aproximada para lidar com áudio externo
+                "meta": "recordings releasegroups releases", # Adicionado releases
+                "fuzzy": 1 
             }
 
-            # POST é obrigatório para fingerprints longos
             resp = self.session.post(url, data=payload, timeout=15)
             response = resp.json()
+            
             logger.info(f"Resposta API: {response.get('status')} - Resultados: {len(response.get('results', []))}")
 
             if response.get("status") == "ok" and response.get("results"):
-                # Score reduzido para 0.05 para compensar a perda de qualidade do microfone
+                # No microfone, aceitamos scores baixos devido à perda acústica
                 results = [r for r in response["results"] if r.get("score", 0) > 0.05]
                 
                 if results:
                     best = max(results, key=lambda x: x.get("score", 0))
-                    logger.info(f"Sucesso! Confiança da identificação: {int(best.get('score')*100)}%")
+                    score_percent = int(best.get("score", 0) * 100)
                     
+                    # Tenta pegar o título
                     track = best["recordings"][0]
                     title = track.get("title", "Desconhecido")
                     
+                    logger.info(f"🎯 IDENTIFICADO: {title} (Confiança: {score_percent}%)")
+
                     rgs = track.get("releasegroups", [])
                     if rgs:
                         mbid = rgs[0].get("id")
@@ -191,11 +195,11 @@ class MoodeAudioMonitor:
                         if img_res.status_code == 200:
                             return {"title": title, "img": img_res.content}
             
-            logger.info("AcoustID: Não foi possível identificar esta amostra.")
+            logger.info("AcoustID: Sem correspondência. Tente aproximar o microfone ou trocar a música.")
             return None
 
         except Exception as e:
-            logger.error(f"Erro AcoustID: {e}")
+            logger.error(f"Erro no AcoustID: {e}")
             return None
         finally:
             if os.path.exists(trimmed):
