@@ -191,7 +191,11 @@ class MoodeAudioMonitor:
                 "fuzzy": 1
             }
 
-            resp = self.session.post(url, data=payload, timeout=10)
+            logger.info(json.dumps(payload)[:200])            
+
+            resp = self.session.get(url, params=payload, timeout=10)
+
+            logger.info(resp.text[:500])
 
             response = resp.json()
 
