@@ -58,25 +58,18 @@ class MoodeAudioMonitor:
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
             path = tmp.name
         
-        # Gravamos o áudio bruto
+        # Gravando DIRETAMENTE em 16kHz Mono (O padrão do AcoustID)
         cmd = [
             'arecord', '-D', f'hw:{MIC_DEVICE_INDEX},0', 
-            '-f', 'S16_LE', '-c', '1', '-r', '44100', 
+            '-f', 'S16_LE', '-c', '1', '-r', '16000', 
             '-d', str(RECORD_SECONDS), path
         ]
         
         try:
             subprocess.run(cmd, capture_output=True, timeout=RECORD_SECONDS + 5)
-            
-            # --- AJUSTE: Normalizar e converter para 16kHz (Otimizado para AcoustID) ---
-            path_fixed = path + "_fixed.wav"
-            try:
-                # Normaliza o volume e converte a taxa de amostragem
-                subprocess.run(['sox', path, '-r', '16000', '-c', '1', path_fixed, 'norm', '-3'], capture_output=True)
-                os.rename(path_fixed, path)
-            except Exception as e:
-                logger.warning(f"Sox não converteu, usando bruto: {e}")
-                
+            # Normalização leve para garantir que o sinal seja claro
+            subprocess.run(['sox', path, path + '_norm.wav', 'norm', '-1'], capture_output=True)
+            os.rename(path + '_norm.wav', path)
             return path
         except Exception as e:
             logger.error(f"Erro no arecord: {e}")
@@ -96,52 +89,38 @@ class MoodeAudioMonitor:
             return False
 
     def get_artwork(self, path):
-        if API_KEY == 'your_acoustid_api_key' or not API_KEY:
-            logger.error("ERRO: API_KEY não configurada no topo do arquivo!")
+        if not API_KEY or API_KEY == 'your_acoustid_api_key':
             return None
 
         try:
-            duration, fp = acoustid.fingerprint_file(path)
-            fingerprint = fp.decode('utf-8') if isinstance(fp, bytes) else fp
-
-            # Gerar fingerprint (garantindo o formato que o servidor prefere)
+            # Gerar fingerprint
             cmd = ['fpcalc', '-plain', path]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            if result.returncode != 0:
-                logger.error(f"Erro no fpcalc: {result.stderr}")
-                return None
-            
             fingerprint = result.stdout.strip()
             
-            # Consulta via POST (mais robusto para fingerprints longos)
+            # Consulta simplificada, mas com o parâmetro de duração correto
             url = "https://api.acoustid.org/v2/lookup"
             data = {
                 "format": "json",
                 "client": API_KEY,
                 "fingerprint": fingerprint,
                 "duration": int(RECORD_SECONDS),
-                "meta": "recordings releases releasegroups medium tracks"
+                "meta": "recordings releasegroups"
             }
-
-            logger.info(f"Fingerprint gerado (prefixo): {fingerprint[:30]}...")
             
-            # Usamos POST em vez de GET para evitar limites de URL
             resp = self.session.post(url, data=data, timeout=10)
             response = resp.json()
             
-            if response.get('status') != 'ok':
-                # EXIBE O ERRO REAL DO SERVIDOR
-                error_msg = response.get('error', {}).get('message', 'Erro desconhecido')
-                logger.error(f"Resposta do AcoustID: {response.get('status')} - {error_msg}")
-                return None
-
-            if response.get('results'):
-                best = response['results'][0]
+            if response.get('status') == 'ok' and response.get('results'):
+                # Ordenar por score para garantir a melhor correspondência
+                results = sorted(response['results'], key=lambda x: x.get('score', 0), reverse=True)
+                best = results[0]
+                
                 if best.get('recordings'):
                     track = best['recordings'][0]
                     artist = track.get('artists', [{}])[0].get('name', 'Unknown')
                     title = track.get('title', 'Unknown')
-                    logger.info(f"!!! SUCESSO: {artist} - {title} (Confiança: {int(best['score']*100)}%)")
+                    logger.info(f"!!! IDENTIFICADO: {artist} - {title} (Score: {int(best['score']*100)}%)")
                     
                     # Busca da capa
                     rgs = track.get('releasegroups', [])
@@ -151,11 +130,11 @@ class MoodeAudioMonitor:
                         img_res = self.session.get(art_url, timeout=5)
                         if img_res.status_code == 200:
                             return {"title": title, "img": img_res.content}
-            else:
-                logger.info("Nenhuma música correspondente encontrada.")
+            
+            logger.info("Aguardando trecho mais claro da música...")
             return None
         except Exception as e:
-            logger.error(f"Erro no Processo: {e}")
+            logger.error(f"Erro: {e}")
             return None
 
     def display_image(self, art_data):
