@@ -11,6 +11,7 @@ import logging.handlers
 import tempfile
 import subprocess
 from datetime import datetime
+import signal
 
 # Configuration
 MIC_DEVICE_INDEX = 0  # Adjust based on your setup
@@ -51,8 +52,11 @@ file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 file_handler.setFormatter(file_formatter)
 logger.addHandler(file_handler)
 
+def timeout_handler(signum, frame):
+    raise TimeoutError("Recording timed out")
+
 def record_audio():
-    try:
+    def _record():
         p = pyaudio.PyAudio()
         stream = p.open(format=FORMAT,
                         channels=CHANNELS,
@@ -74,8 +78,16 @@ def record_audio():
         p.terminate()
 
         return b''.join(frames)
-    except Exception as e:
+
+    try:
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(RECORD_SECONDS + 10)  # Timeout a bit longer than recording
+        result = _record()
+        signal.alarm(0)  # Cancel alarm
+        return result
+    except (Exception, TimeoutError) as e:
         logger.error(f"Error recording audio: {e}")
+        signal.alarm(0)  # Ensure alarm is cancelled
         return None
 
 def fingerprint_audio(audio_data):
