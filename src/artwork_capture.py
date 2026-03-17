@@ -148,6 +148,12 @@ class MoodeAudioMonitor:
                 "trim", "3", "17" # Pulamos menos e pegamos um trecho maior (14s)
             ], check=True)
 
+            # --- COPIAR PARA PASTA DE TESTE ---
+            # Isso salva o áudio processado em /var/lib/mpd/music/test_ident.wav
+            # Você poderá ouvir esse arquivo pelo próprio Moode Audio!
+            subprocess.run(["cp", trimmed, "/var/lib/mpd/music/test_ident.wav"])
+            logger.info("Arquivo de teste salvo em /var/lib/mpd/music/test_ident.wav")
+
             cmd = ["fpcalc", "-json", trimmed]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             fp_data = json.loads(result.stdout)
