@@ -57,6 +57,7 @@ def timeout_handler(signum, frame):
 
 def record_audio():
     def _record():
+        logger.info(f"Attempting to record from device index {MIC_DEVICE_INDEX}")
         p = pyaudio.PyAudio()
         stream = p.open(format=FORMAT,
                         channels=CHANNELS,
