@@ -2,6 +2,20 @@
 
 Este projeto captura áudio de um microfone em um Raspberry Pi rodando Moode, realiza fingerprinting de áudio para identificar a música tocando, busca artwork de álbuns via APIs e exibe em uma tela conectada. É totalmente automático e transparente para o usuário.
 
+## Quick Start (TL;DR)
+
+```bash
+# No Raspberry Pi via SSH:
+sudo apt-get update && sudo apt-get install -y python3-dev python3-pip python3-venv ffmpeg libportaudio2 portaudio19-dev git
+git clone https://github.com/seu-usuario/artwork-capture.git && cd artwork-capture
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+echo 'export ACOUSTID_API_KEY=0cAcPUvHVU' >> ~/.bashrc && source ~/.bashrc
+python src/artwork_capture.py
+```
+
+(Veja seção "Instalação Passo a Passo" abaixo para detalhes e configuração completa)
+
 ## Funcionalidades
 - Captura de áudio via microfone USB
 - Fingerprinting de música usando AcoustID
@@ -20,41 +34,77 @@ Este projeto captura áudio de um microfone em um Raspberry Pi rodando Moode, re
 
 ## Instalação Passo a Passo
 
+### Pré-requisitos de Sistema (no Raspberry Pi)
+
+Antes de instalar as dependências Python, instale as bibliotecas de sistema necessárias:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  python3-dev \
+  python3-pip \
+  python3-venv \
+  ffmpeg \
+  libportaudio2 \
+  portaudio19-dev \
+  git
+```
+
+**O que cada pacote faz:**
+- `python3-dev`: Necessário para compilar PyAudio
+- `ffmpeg`: Necessário para fingerprinting de áudio (pyacoustid)
+- `portaudio19-dev`: Necessário para PyAudio
+- `git`: Para clonar o repositório
+
+### Instalação do Projeto
+
 1. **Clone o repositório no seu Raspberry Pi:**
-   ```
+   ```bash
    git clone https://github.com/seu-usuario/artwork-capture.git
    cd artwork-capture
    ```
 
 2. **Crie e ative um ambiente virtual:**
-   ```
+   ```bash
    python3 -m venv venv
    source venv/bin/activate
    ```
 
-3. **Instale as dependências:**
-   ```
+3. **Instale as dependências Python:**
+   ```bash
    pip install -r requirements.txt
    ```
+   *(Este passo pode levar alguns minutos, especialmente PyAudio)*
 
 4. **Configure a chave da API do AcoustID:**
    - Obtenha uma chave gratuita em [acoustid.org](https://acoustid.org/).
    - Defina a variável de ambiente:
-     ```
+     ```bash
      export ACOUSTID_API_KEY=sua_chave_aqui
      ```
-   - Para persistir, adicione ao seu `~/.bashrc` ou `~/.profile`:
-     ```
+   - Para persistir entre reinicializações, adicione ao seu `~/.bashrc`:
+     ```bash
      echo 'export ACOUSTID_API_KEY=sua_chave_aqui' >> ~/.bashrc
      source ~/.bashrc
      ```
 
-5. **Configure permissões para gerenciamento de display (opcional, para tela única):**
-   - Adicione o usuário ao grupo sudo (se necessário):
+5. **Configure permissões para gerenciamento de display (opcional, se tiver tela):**
+   - Para controlar a UI do Moode automaticamente, configure sudo sem senha para systemctl:
+     ```bash
+     sudo visudo
      ```
-     sudo usermod -aG sudo pi
+   - Adicione esta linha no final:
      ```
-   - Ou rode o script com sudo (não recomendado para produção).
+     pi ALL=(ALL) NOPASSWD: /bin/systemctl stop lighttpd, /bin/systemctl start lighttpd
+     ```
+   - (Substitua `pi` pelo seu usuário se for diferente)
+
+6. **Teste o setup (opcional):**
+   ```bash
+   source venv/bin/activate
+   python -m pytest tests/test_main.py -v
+   ```
+   Se todos os testes passarem, o setup está correto.
 
 ## Configuração
 
@@ -121,23 +171,46 @@ Estes testes verificam:
 
 ## Troubleshooting
 
+### Problema: Erro ao instalar PyAudio (Raspberry Pi)
+Se receber erro durante `pip install -r requirements.txt`:
+```
+error: Microsoft Visual C++ 14.0 or greater is required
+```
+Certifique-se de que instalou os pré-requisitos de sistema:
+```bash
+sudo apt-get install -y python3-dev portaudio19-dev
+```
+Depois repita: `pip install -r requirements.txt`
+
+### Problema: "Error fingerprinting audio"
+Se o log mostrar:
+```
+ERROR - Error fingerprinting audio: Error
+```
+FFmpeg não está instalado. Instale-o:
+```bash
+sudo apt-get install -y ffmpeg
+```
+Teste:
+```bash
+which ffmpeg
+ffmpeg -version
+```
+
 ### Problema: Script não encontra microfone
-- Verifique dispositivos: `python3 -c "import pyaudio; p = pyaudio.PyAudio(); [print(f'{i}: {p.get_device_info_by_index(i)[\"name\"]}') for i in range(p.get_device_count())]"`
-- Ajuste `MIC_DEVICE_INDEX` no código.
+- Verifique dispositivos conectados: `arecord -l` (mostra lista de dispositivos de áudio)
+- Liste com PyAudio: `python3 -c "import pyaudio; p = pyaudio.PyAudio(); [print(f'{i}: {p.get_device_info_by_index(i)[\"name\"]}') for i in range(p.get_device_count())]"`
+- Ajuste `MIC_DEVICE_INDEX` no `src/artwork_capture.py` com o número correto.
 
 ### Problema: Erro de conexão com MPD
-- Certifique-se de que Moode está rodando e MPD na porta 6600.
-- Verifique logs: o script loga erros.
+- Certifique-se de que Moode está rodando: `ps aux | grep mpd`
+- Teste conexão: `echo "status" | nc localhost 6600`
+- Reinicie MPD: `sudo systemctl restart mpd`
 
 ### Problema: Display não funciona ou conflita
 - Para tela única: confirme que `STOP_UI_CMD` e `START_UI_CMD` estão corretos.
 - Rode com sudo se necessário: `sudo -E python src/artwork_capture.py` (preserva env vars).
 - Se pygame falhar, verifique se a tela suporta gráficos (use HDMI com saída gráfica).
-
-### Problema: Fingerprinting falha
-- Verifique chave da API: `echo $ACOUSTID_API_KEY`
-- Teste conectividade: `ping acoustid.org`
-- Música muito baixa? Ajuste threshold em `has_audio()`.
 
 ### Problema: Artwork não encontrado
 - Nem todas as músicas têm artwork no MusicBrainz.
