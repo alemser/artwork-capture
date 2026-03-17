@@ -320,15 +320,20 @@ def main():
         if not is_streaming:
             # Check for analog playback
             audio_data = record_audio()
-            if audio_data and has_audio(audio_data):
-                logger.info("Audio detected from analog source")
-                fp = fingerprint_audio(audio_data)
-                if fp:
-                    recording = get_metadata(fp)
-                    if recording:
-                        artwork = get_artwork(recording)
-                        if artwork:
-                            display_image(artwork)
+            if audio_data:
+                if has_audio(audio_data):
+                    logger.info("Audio detected from analog source")
+                    fp = fingerprint_audio(audio_data)
+                    if fp:
+                        recording = get_metadata(fp)
+                        if recording:
+                            artwork = get_artwork(recording)
+                            if artwork:
+                                display_image(artwork)
+                else:
+                    logger.debug("No significant audio detected, skipping")
+            else:
+                logger.warning("Failed to record audio")
         time.sleep(30)  # Check every 30 seconds
 
 if __name__ == "__main__":
