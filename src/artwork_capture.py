@@ -87,7 +87,7 @@ class MoodeAudioMonitor:
             "-c",
             "1",
             "-r",
-            "16000",
+            "44100",
             "-d",
             str(RECORD_SECONDS),
             path
@@ -149,6 +149,18 @@ class MoodeAudioMonitor:
             return None
 
         try:
+
+            trimmed = path + "_trim.wav"
+
+            subprocess.run([
+                "sox",
+                path,
+                trimmed,
+                "trim",
+                "5"
+            ])
+
+            path = trimmed            
 
             cmd = [
                 "fpcalc",
