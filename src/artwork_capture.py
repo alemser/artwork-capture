@@ -13,10 +13,10 @@ from scipy import signal
 
 # --- CONFIGURACOES ---
 MIC_DEVICE_INDEX = 3
-RECORD_SECONDS = 15
+RECORD_SECONDS = 25
 API_KEY = os.environ.get('ACOUSTID_API_KEY', 'your_acoustid_api_key') 
 DISPLAY_RES = (800, 480)
-CHECK_INTERVAL = 15
+CHECK_INTERVAL = 10
 THRESHOLD_RATIO = 0.02 
 
 logging.basicConfig(
@@ -97,41 +97,40 @@ class MoodeAudioMonitor:
 
     def get_artwork(self, path):
         if API_KEY == 'your_acoustid_api_key' or not API_KEY:
-            logger.error("ERRO: Voce precisa configurar sua API_KEY do AcoustID!")
+            logger.error("API_KEY não configurada!")
             return None
 
         try:
-            # Fingerprint local
+            # Gerar fingerprint
             duration, fp = acoustid.fingerprint_file(path)
             
-            # Consulta ao servidor
-            res = acoustid.lookup(API_KEY, fp, duration)
+            # Consulta com meta-dados extras para ajudar na busca
+            res = acoustid.lookup(API_KEY, fp, duration, meta=['recordings', 'releasegroups'])
             
-            # Verifica se o servidor retornou erro (ex: chave invalida)
-            if res.get('status') != 'ok':
-                logger.error(f"Erro no Servidor AcoustID: {res.get('error', 'Desconhecido')}")
-                return None
-
-            if 'results' in res and res['results']:
-                best_match = res['results'][0]
-                recs = best_match.get('recordings', [])
-                if recs:
-                    title = recs[0].get('title', 'Unknown')
-                    artist = recs[0].get('artists', [{}])[0].get('name', 'Unknown')
-                    logger.info(f"Identificado: {artist} - {title}")
-                    
-                    rgs = recs[0].get('releasegroups', [])
-                    if rgs:
-                        mbid = rgs[0].get('id')
-                        url = f"https://coverartarchive.org/release-group/{mbid}/front"
-                        img_res = self.session.get(url, timeout=5)
-                        if img_res.status_code == 200:
-                            return {"title": title, "img": img_res.content}
+            if res.get('status') == 'ok' and res.get('results'):
+                # Pegamos o resultado com maior score de confiança
+                for result in res['results']:
+                    if result.get('recordings'):
+                        rec = result['recordings'][0]
+                        title = rec.get('title')
+                        artist = rec.get('artists', [{}])[0].get('name', 'Desconhecido')
+                        
+                        logger.info(f">>> SUCESSO! Identificado: {artist} - {title} (Score: {result.get('score')})")
+                        
+                        rgs = rec.get('releasegroups', [])
+                        if rgs:
+                            mbid = rgs[0].get('id')
+                            url = f"https://coverartarchive.org/release-group/{mbid}/front"
+                            img_res = self.session.get(url, timeout=5)
+                            if img_res.status_code == 200:
+                                return {"title": title, "img": img_res.content}
+                
+                logger.info("Música reconhecida, mas sem capa disponível no Archive.")
             else:
-                logger.info("Musica ouvida, mas nao encontrada no banco de dados.")
+                logger.info("Assinatura enviada, mas sem correspondência exata no banco de dados.")
             return None
         except Exception as e:
-            logger.error(f"Erro no Processo AcoustID: {e}")
+            logger.error(f"Erro no Processo: {e}")
             return None
 
     def display_image(self, art_data):
