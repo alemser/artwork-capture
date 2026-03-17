@@ -17,7 +17,7 @@ RECORD_SECONDS = 15
 API_KEY = os.environ.get('ACOUSTID_API_KEY', 'your_acoustid_api_key') 
 DISPLAY_RES = (800, 480)
 CHECK_INTERVAL = 15
-THRESHOLD_RATIO = 0.08 
+THRESHOLD_RATIO = 0.02 
 
 logging.basicConfig(
     level=logging.INFO,
@@ -72,7 +72,7 @@ class MoodeAudioMonitor:
             # Isso ajuda o AcoustID a "ouvir" melhor o seu Rega
             try:
                 # Se tiver o sox instalado: sudo apt install sox
-                subprocess.run(['sox', '-v', '10.0', path, path + '_loud.wav'], capture_output=True)
+                subprocess.run(['sox', '-v', '5.0', path, path + '_loud.wav'], capture_output=True)
                 os.rename(path + '_loud.wav', path)
             except:
                 pass 
