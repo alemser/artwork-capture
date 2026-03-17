@@ -16,8 +16,8 @@ MIC_DEVICE_INDEX = 3
 RECORD_SECONDS = 10
 API_KEY = os.environ.get('ACOUSTID_API_KEY', 'your_acoustid_api_key') 
 DISPLAY_RES = (800, 480)
-CHECK_INTERVAL = 20
-THRESHOLD_RATIO = 0.15 
+CHECK_INTERVAL = 15
+THRESHOLD_RATIO = 0.08 
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,6 +83,14 @@ class MoodeAudioMonitor:
             return False
 
     def get_artwork(self, path):
+        # --- NOVO: Normalização de volume via software ---
+        try:
+            # Aumenta o volume do arquivo gravado antes de enviar para o reconhecimento
+            subprocess.run(['sox', path, path, 'norm', '-1'], capture_output=True)
+        except:
+            pass # Se não tiver o 'sox' instalado, ele segue normalmente
+        # -------------------------------------------------
+        
         try:
             duration, fp = acoustid.fingerprint_file(path)
             res = acoustid.lookup(API_KEY, fp, duration)
