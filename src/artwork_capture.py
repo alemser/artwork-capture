@@ -96,38 +96,53 @@ class MoodeAudioMonitor:
             return False
 
     def get_artwork(self, path):
-        if API_KEY == 'your_acoustid_api_key' or not API_KEY:
+        if API_KEY == 'your_acoustid_api_key':
             logger.error("API_KEY não configurada!")
             return None
 
         try:
-            # Gerar fingerprint
-            duration, fp = acoustid.fingerprint_file(path)
+            # Gerar fingerprint usando a ferramenta oficial do sistema (fpcalc)
+            cmd = ['fpcalc', '-plain', path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             
-            # Consulta com meta-dados extras para ajudar na busca
-            res = acoustid.lookup(API_KEY, fp, duration, meta=['recordings', 'releasegroups'])
-            
-            if res.get('status') == 'ok' and res.get('results'):
-                # Pegamos o resultado com maior score de confiança
-                for result in res['results']:
-                    if result.get('recordings'):
-                        rec = result['recordings'][0]
-                        title = rec.get('title')
-                        artist = rec.get('artists', [{}])[0].get('name', 'Desconhecido')
-                        
-                        logger.info(f">>> SUCESSO! Identificado: {artist} - {title} (Score: {result.get('score')})")
-                        
-                        rgs = rec.get('releasegroups', [])
-                        if rgs:
-                            mbid = rgs[0].get('id')
-                            url = f"https://coverartarchive.org/release-group/{mbid}/front"
-                            img_res = self.session.get(url, timeout=5)
-                            if img_res.status_code == 200:
-                                return {"title": title, "img": img_res.content}
+            if result.returncode != 0:
+                logger.error("Falha ao gerar fingerprint com fpcalc. Verifique se está instalado.")
+                return None
                 
-                logger.info("Música reconhecida, mas sem capa disponível no Archive.")
-            else:
-                logger.info("Assinatura enviada, mas sem correspondência exata no banco de dados.")
+            fingerprint = result.stdout.strip()
+            
+            # Consulta ao AcoustID
+            # Usamos uma duração fixa de 25s para bater com o RECORD_SECONDS
+            url = "https://api.acoustid.org/v2/lookup"
+            params = {
+                "client": API_KEY,
+                "code": fingerprint,
+                "duration": RECORD_SECONDS,
+                "meta": "recordings releasegroups"
+            }
+            
+            response = self.session.get(url, params=params, timeout=10).json()
+            
+            if response.get('status') == 'ok' and response.get('results'):
+                # Pegar o melhor resultado
+                best = response['results'][0]
+                if best.get('recordings'):
+                    track = best['recordings'][0]
+                    title = track.get('title')
+                    artist = track.get('artists', [{}])[0].get('name', 'Desconhecido')
+                    
+                    logger.info(f"!!! SUCESSO: {artist} - {title} (Confiança: {int(best['score']*100)}%)")
+                    
+                    # Tentar pegar a capa
+                    rgs = track.get('releasegroups', [])
+                    if rgs:
+                        mbid = rgs[0].get('id')
+                        art_url = f"https://coverartarchive.org/release-group/{mbid}/front"
+                        img_res = self.session.get(art_url, timeout=5)
+                        if img_res.status_code == 200:
+                            return {"title": title, "img": img_res.content}
+            
+            logger.info("Assinatura enviada, mas o banco de dados não reconheceu esta trecho.")
             return None
         except Exception as e:
             logger.error(f"Erro no Processo: {e}")
