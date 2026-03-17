@@ -126,7 +126,7 @@ class MoodeAudioMonitor:
 
             max_amp = np.max(np.abs(data))
 
-            freqs, psd = signal.welch(data, fs=16000)
+            freqs, psd = signal.welch(data, fs=44100)
 
             music_ratio = np.sum(psd > (np.max(psd) * 0.01)) / len(psd)
 
