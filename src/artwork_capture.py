@@ -7,8 +7,10 @@ import pygame
 import time
 import os
 import logging
+import logging.handlers
 import tempfile
 import subprocess
+from datetime import datetime
 
 # Configuration
 MIC_DEVICE_INDEX = 0  # Adjust based on your setup
@@ -20,13 +22,34 @@ RECORD_SECONDS = 10  # Record 10 seconds for fingerprinting
 API_KEY = os.environ.get('ACOUSTID_API_KEY', 'your_acoustid_api_key')  # Set via export ACOUSTID_API_KEY=...
 DISPLAY_WIDTH = 800
 DISPLAY_HEIGHT = 480
+LOG_FILE = 'artwork_capture.log'
+LOG_MAX_SIZE = 1024 * 1024  # 1MB
 
 # Commands to stop/start Moode UI (lighttpd web server)
 STOP_UI_CMD = ["sudo", "systemctl", "stop", "lighttpd"]
 START_UI_CMD = ["sudo", "systemctl", "start", "lighttpd"]
 
-logging.basicConfig(level=logging.INFO)
+# Setup logging with file rotation
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
+
+# File handler with rotation (1MB max)
+file_handler = logging.handlers.RotatingFileHandler(
+    LOG_FILE,
+    maxBytes=LOG_MAX_SIZE,
+    backupCount=5
+)
+file_handler.setLevel(logging.INFO)
+file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+logger.addHandler(file_handler)
 
 def record_audio():
     try:
@@ -140,6 +163,87 @@ def display_image(image_data):
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to start UI: {e}")
 
+def is_display_available():
+    """Check if a display device is available"""
+    try:
+        # Try to detect display using pygame
+        import os
+        
+        # Check for DISPLAY environment variable (X11/Wayland)
+        if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
+            return True
+        
+        # Try to initialize pygame to check for framebuffer/display
+        try:
+            pygame.init()
+            pygame.display.set_mode((1, 1))
+            pygame.display.quit()
+            pygame.quit()
+            return True
+        except Exception:
+            return False
+    except Exception as e:
+        logger.warning(f"Error checking display availability: {e}")
+        return False
+
+def get_mpd_status(client):
+    """Get current MPD playback status"""
+    try:
+        status = client.status()
+        state = status.get('state', 'stop')
+        return state == 'play'
+    except Exception:
+        return False
+
+def log_detected_music(recording, source='analog'):
+    """Log detected music to file with metadata"""
+    if not recording:
+        return
+    
+    try:
+        title = recording.get('title', 'Unknown Title')
+        artists = recording.get('artists', [])
+        artist_name = ', '.join([a.get('name', 'Unknown') for a in artists]) if artists else 'Unknown Artist'
+        
+        log_entry = f"DETECTED | Source: {source} | Artist: {artist_name} | Title: {title}"
+        logger.info(log_entry)
+    except Exception as e:
+        logger.error(f"Error logging music: {e}")
+
+def headless_mode(client):
+    """Run in headless mode (no display) - logs detected music to file"""
+    logger.info("=== HEADLESS MODE ===")
+    logger.info("No display detected. Running in headless mode - logging music detections to file.")
+    
+    while True:
+        is_streaming = False
+        
+        # Check if MPD is playing (streaming)
+        try:
+            if get_mpd_status(client):
+                is_streaming = True
+        except Exception as e:
+            logger.error(f"Error checking MPD status: {e}")
+        
+        if is_streaming:
+            logger.debug("Streaming via Moode detected - skipping analog source check")
+        else:
+            # Check for analog source
+            audio_data = record_audio()
+            if audio_data and has_audio(audio_data):
+                logger.info("Audio detected from analog source")
+                fp = fingerprint_audio(audio_data)
+                if fp:
+                    recording = get_metadata(fp)
+                    if recording:
+                        log_detected_music(recording, source='vinyl/CD')
+                    else:
+                        logger.info("DETECTED | Source: vinyl/CD | Music not found in database")
+            else:
+                logger.debug("No audio detected - silence")
+        
+        time.sleep(30)  # Check every 30 seconds
+
 def has_audio(audio_data):
     # Check if the audio has significant sound
     import struct
@@ -149,21 +253,51 @@ def has_audio(audio_data):
     return max_amplitude > threshold
 
 def main():
-    pygame.init()
+    logger.info("Starting Artwork Capture")
+    
+    # Check microphone availability
+    try:
+        import pyaudio
+        p = pyaudio.PyAudio()
+        device_count = p.get_device_count()
+        if device_count == 0:
+            logger.error("No audio devices found. Exiting.")
+            return
+        logger.info(f"Found {device_count} audio device(s)")
+        p.terminate()
+    except Exception as e:
+        logger.error(f"Error checking microphone: {e}")
+        return
+    
+    # Connect to MPD
     client = MPDClient()
     try:
         client.connect("localhost", 6600)  # Moode MPD port
+        logger.info("Connected to Moode MPD")
         mpd_available = True
     except Exception as e:
         logger.warning(f"MPD not available: {e}")
         mpd_available = False
-
+    
+    # Check for display
+    display_available = is_display_available()
+    logger.info(f"Display available: {display_available}")
+    
+    if not display_available:
+        # Run in headless mode if no display
+        logger.info("No display found - running in headless mode")
+        headless_mode(client)
+        return
+    
+    # Normal mode with display
+    pygame.init()
+    logger.info("Running in display mode")
+    
     while True:
         is_streaming = False
         if mpd_available:
             try:
-                status = client.status()
-                if status.get('state') == 'play':
+                if get_mpd_status(client):
                     is_streaming = True
             except Exception as e:
                 logger.error(f"Error checking MPD status: {e}")
@@ -172,6 +306,7 @@ def main():
             # Check for analog playback
             audio_data = record_audio()
             if audio_data and has_audio(audio_data):
+                logger.info("Audio detected from analog source")
                 fp = fingerprint_audio(audio_data)
                 if fp:
                     recording = get_metadata(fp)

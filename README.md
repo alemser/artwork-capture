@@ -75,10 +75,24 @@ Edite `src/artwork_capture.py` para ajustar:
    source venv/bin/activate
    nohup python src/artwork_capture.py &
    ```
-4. O script monitora automaticamente:
-   - Se MPD estiver tocando (streaming), pula o processamento.
-   - Se não estiver (fonte analógica), grava áudio, verifica se há som, faz fingerprinting, busca artwork e exibe por 30 segundos.
-   - Para tela única, para a UI do player temporariamente e reinicia depois.
+
+### Modo Display (com tela)
+O script monitora automaticamente:
+- Se MPD estiver tocando (streaming), pula o processamento.
+- Se não estiver (fonte analógica), grava áudio, verifica se há som, faz fingerprinting, busca artwork e exibe por 30 segundos.
+- Para tela única, para a UI do player temporariamente e reinicia depois.
+
+### Modo Headless (sem tela)
+Se nenhuma tela for detectada, o script entra automaticamente em **modo headless**:
+- Continua capturando áudio do microfone
+- Registra músicas detectadas em `artwork_capture.log` com timestamp, fonte e metadados
+- Log rotacionado automaticamente (máx 1MB com backup de 5 arquivos)
+- Útil para testar em Pi sem display, ou guardar histórico de músicas tocadas
+
+O arquivo de log é salvo no diretório do projeto e contém:
+```
+2026-03-17 10:30:45,123 - INFO - DETECTED | Source: vinyl/CD | Artist: The Beatles | Title: Abbey Road
+```
 
 ## Testes
 
