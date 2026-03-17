@@ -257,7 +257,7 @@ def has_audio(audio_file_path):
         import struct
         data = struct.unpack('<' + 'h' * (len(frames) // 2), frames)
         max_amplitude = max(abs(sample) for sample in data)
-        logger.debug(f"Max amplitude: {max_amplitude}")
+        logger.info(f"Max amplitude: {max_amplitude}")
         threshold = 1000  # Adjust based on mic sensitivity
         return max_amplitude > threshold
     except Exception as e:
