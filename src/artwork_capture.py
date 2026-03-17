@@ -13,7 +13,7 @@ from scipy import signal
 
 # --- CONFIGURACOES ---
 MIC_DEVICE_INDEX = 3
-RECORD_SECONDS = 10
+RECORD_SECONDS = 15
 API_KEY = os.environ.get('ACOUSTID_API_KEY', 'your_acoustid_api_key') 
 DISPLAY_RES = (800, 480)
 CHECK_INTERVAL = 15
@@ -57,13 +57,26 @@ class MoodeAudioMonitor:
     def record_audio(self):
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
             path = tmp.name
+        
+        # Gravamos normalmente
         cmd = [
             'arecord', '-D', f'hw:{MIC_DEVICE_INDEX},0', 
             '-f', 'S16_LE', '-c', '1', '-r', '44100', 
             '-d', str(RECORD_SECONDS), path
         ]
+        
         try:
-            subprocess.run(cmd, capture_output=True, timeout=RECORD_SECONDS + 2)
+            subprocess.run(cmd, capture_output=True, timeout=RECORD_SECONDS + 5)
+            
+            # --- NOVO: Aumentar volume digitalmente em 10x ---
+            # Isso ajuda o AcoustID a "ouvir" melhor o seu Rega
+            try:
+                # Se tiver o sox instalado: sudo apt install sox
+                subprocess.run(['sox', '-v', '10.0', path, path + '_loud.wav'], capture_output=True)
+                os.rename(path + '_loud.wav', path)
+            except:
+                pass 
+                
             return path
         except Exception as e:
             logger.error(f"Erro no arecord: {e}")
