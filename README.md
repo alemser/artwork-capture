@@ -7,7 +7,7 @@ Este projeto captura áudio de um microfone em um Raspberry Pi rodando Moode, re
 ```bash
 # No Raspberry Pi via SSH:
 sudo apt-get update && sudo apt-get install -y python3-dev python3-pip python3-venv ffmpeg libportaudio2 portaudio19-dev git
-git clone https://github.com/seu-usuario/artwork-capture.git && cd artwork-capture
+git clone https://github.com/alemser/artwork-capture.git && cd artwork-capture
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 echo 'export ACOUSTID_API_KEY=0cAcPUvHVU' >> ~/.bashrc && source ~/.bashrc
@@ -60,7 +60,7 @@ sudo apt-get install -y \
 
 1. **Clone o repositório no seu Raspberry Pi:**
    ```bash
-   git clone https://github.com/seu-usuario/artwork-capture.git
+   git clone https://github.com/alemser/artwork-capture.git
    cd artwork-capture
    ```
 
