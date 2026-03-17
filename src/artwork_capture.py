@@ -80,16 +80,11 @@ class MoodeAudioMonitor:
 
         cmd = [
             "arecord",
-            "-D",
-            f"hw:{MIC_DEVICE_INDEX},0",
-            "-f",
-            "S16_LE",
-            "-c",
-            "1",
-            "-r",
-            "44100",
-            "-d",
-            str(RECORD_SECONDS),
+            "-D", f"hw:{MIC_DEVICE_INDEX},0",
+            "-f", "S16_LE",
+            "-c", "2",
+            "-r", "44100",
+            "-d", str(RECORD_SECONDS),
             path
         ]
 
@@ -101,7 +96,7 @@ class MoodeAudioMonitor:
                 timeout=RECORD_SECONDS + 5
             )
 
-            logger.info("Áudio gravado.")
+            logger.info("Áudio gravado ", path)
 
             return path
 
@@ -165,8 +160,6 @@ class MoodeAudioMonitor:
             cmd = [
                 "fpcalc",
                 "-json",
-                "-length",
-                "120",
                 path
             ]
 
