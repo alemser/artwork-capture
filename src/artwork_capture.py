@@ -117,26 +117,31 @@ class MoodeAudioMonitor:
                  logger.warning(f"Servidor recebeu o sinal, mas o score foi abaixo do limite para {RECORD_SECONDS}s.")
             
             if response.get('status') == 'ok' and response.get('results'):
-                # Ordenar por score para garantir a melhor correspondência
-                results = sorted(response['results'], key=lambda x: x.get('score', 0), reverse=True)
-                best = results[0]
+                # Pegamos o resultado com maior score, mesmo que seja baixo
+                best = max(response['results'], key=lambda x: x.get('score', 0))
                 
-                if best.get('recordings'):
-                    track = best['recordings'][0]
-                    artist = track.get('artists', [{}])[0].get('name', 'Unknown')
-                    title = track.get('title', 'Unknown')
-                    logger.info(f"!!! IDENTIFICADO: {artist} - {title} (Score: {int(best['score']*100)}%)")
-                    
-                    # Busca da capa
-                    rgs = track.get('releasegroups', [])
-                    if rgs:
-                        mbid = rgs[0].get('id')
-                        art_url = f"https://coverartarchive.org/release-group/{mbid}/front"
-                        img_res = self.session.get(art_url, timeout=5)
-                        if img_res.status_code == 200:
-                            return {"title": title, "img": img_res.content}
+                # Definimos um limite de confiança manual (0.4 = 40%)
+                if best.get('score', 0) > 0.3: 
+                    if best.get('recordings'):
+                        track = best['recordings'][0]
+                        artist = track.get('artists', [{}])[0].get('name', 'Desconhecido')
+                        title = track.get('title', 'Desconhecido')
+                        
+                        logger.info(f"!!! IDENTIFICADO: {artist} - {title} (Score: {int(best['score']*100)}%)")
+                        
+                        # Tenta buscar a capa
+                        rgs = track.get('releasegroups', [])
+                        if rgs:
+                            mbid = rgs[0].get('id')
+                            art_url = f"https://coverartarchive.org/release-group/{mbid}/front"
+                            img_res = self.session.get(art_url, timeout=5)
+                            if img_res.status_code == 200:
+                                return {"title": title, "img": img_res.content}
+                else:
+                    logger.warning(f"Score muito baixo: {int(best.get('score', 0)*100)}%. Tentando novamente...")
             
-            logger.info("Aguardando trecho mais claro da música...")
+            elif response.get('status') == 'ok':
+                logger.info("Nenhuma correspondência encontrada no banco de dados.")
             return None
         except Exception as e:
             logger.error(f"Erro: {e}")
