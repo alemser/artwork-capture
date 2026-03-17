@@ -25,6 +25,7 @@ DISPLAY_WIDTH = 800
 DISPLAY_HEIGHT = 480
 LOG_FILE = 'artwork_capture.log'
 LOG_MAX_SIZE = 1024 * 1024  # 1MB
+FORCE_HEADLESS = True  # Set to True if no physical display (forces headless mode)
 
 # Commands to stop/start Moode UI (lighttpd web server)
 STOP_UI_CMD = ["sudo", "systemctl", "stop", "lighttpd"]
@@ -299,9 +300,9 @@ def main():
     display_available = is_display_available()
     logger.info(f"Display available: {display_available}")
     
-    if not display_available:
-        # Run in headless mode if no display
-        logger.info("No display found - running in headless mode")
+    if FORCE_HEADLESS or not display_available:
+        # Run in headless mode
+        logger.info("Running in headless mode (forced or no display)")
         headless_mode(client)
         return
     
