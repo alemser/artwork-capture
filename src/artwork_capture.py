@@ -101,39 +101,45 @@ class MoodeAudioMonitor:
             return None
 
         try:
-            # Gerar fingerprint usando a ferramenta oficial do sistema (fpcalc)
+            # Gerar fingerprint
             cmd = ['fpcalc', '-plain', path]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            
             if result.returncode != 0:
-                logger.error("Falha ao gerar fingerprint com fpcalc. Verifique se está instalado.")
+                logger.error("Erro ao rodar fpcalc. Verifique a instalação.")
                 return None
-                
+            
             fingerprint = result.stdout.strip()
             
-            # Consulta ao AcoustID
-            # Usamos uma duração fixa de 25s para bater com o RECORD_SECONDS
+            # Consulta
             url = "https://api.acoustid.org/v2/lookup"
             params = {
                 "client": API_KEY,
                 "code": fingerprint,
                 "duration": RECORD_SECONDS,
-                "meta": "recordings releasegroups"
+                "meta": "recordings releasegroups",
+                "fuzzy": 1
             }
             
             response = self.session.get(url, params=params, timeout=10).json()
             
+            # --- LOG DE DIAGNÓSTICO ---
+            logger.info(f"Status da Resposta: {response.get('status')}")
+            if 'results' in response and response['results']:
+                score = response['results'][0].get('score')
+                logger.info(f"Melhor Score encontrado: {score}")
+            else:
+                logger.info("Nenhum resultado retornado pelo servidor.")
+            # --------------------------
+
             if response.get('status') == 'ok' and response.get('results'):
-                # Pegar o melhor resultado
                 best = response['results'][0]
                 if best.get('recordings'):
                     track = best['recordings'][0]
-                    title = track.get('title')
                     artist = track.get('artists', [{}])[0].get('name', 'Desconhecido')
+                    title = track.get('title', 'Sem Título')
+                    logger.info(f"!!! SUCESSO: {artist} - {title}")
                     
-                    logger.info(f"!!! SUCESSO: {artist} - {title} (Confiança: {int(best['score']*100)}%)")
-                    
-                    # Tentar pegar a capa
+                    # Busca da capa
                     rgs = track.get('releasegroups', [])
                     if rgs:
                         mbid = rgs[0].get('id')
@@ -141,8 +147,6 @@ class MoodeAudioMonitor:
                         img_res = self.session.get(art_url, timeout=5)
                         if img_res.status_code == 200:
                             return {"title": title, "img": img_res.content}
-            
-            logger.info("Assinatura enviada, mas o banco de dados não reconheceu esta trecho.")
             return None
         except Exception as e:
             logger.error(f"Erro no Processo: {e}")
