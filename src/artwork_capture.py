@@ -115,7 +115,7 @@ class MoodeAudioMonitor:
             data = {
                 "format": "json",
                 "client": API_KEY,
-                "code": fingerprint,
+                "fingerprint": fingerprint,
                 "duration": int(RECORD_SECONDS),
                 "meta": "recordings releasegroups"
             }
