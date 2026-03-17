@@ -15,7 +15,6 @@ from scipy import signal
 # --- CONFIGURAÇÕES ---
 MIC_DEVICE_INDEX = 3
 RECORD_SECONDS = 25
-# Substitua pela sua chave real ou defina no ambiente
 API_KEY = os.environ.get("ACOUSTID_API_KEY", "your_acoustid_api_key")
 
 DISPLAY_RES = (800, 480)
@@ -47,7 +46,6 @@ class MoodeAudioMonitor:
 
     def should_scan_analog(self):
         try:
-            # Tenta um ping para verificar se a conexão ainda está ativa
             if self.mpd_connected:
                 try:
                     self.client.ping()
@@ -58,10 +56,9 @@ class MoodeAudioMonitor:
                 self.connect_mpd()
 
             if not self.mpd_connected:
-                return True # Se não consegue conectar, assume modo analógico
+                return True 
 
             status = self.client.status()
-            # Se o MPD está tocando algo com título, não escaneamos o analógico
             if status.get("state") == "play":
                 song = self.client.currentsong()
                 if song and "title" in song:
@@ -77,7 +74,7 @@ class MoodeAudioMonitor:
         fd, path = tempfile.mkstemp(suffix=".wav", prefix="moode_rec_")
         os.close(fd) 
 
-        # Ordem de tentativa: Mono 44.1k é a que funcionou no seu log
+        # Tentamos Mono primeiro, que é o que seu hardware USB PnP aceita
         configs = [
             ["-c", "1", "-r", "44100"],
             ["-c", "2", "-r", "44100"]
@@ -95,62 +92,6 @@ class MoodeAudioMonitor:
         if os.path.exists(path): os.unlink(path)
         return None
 
-    def get_artwork(self, path):
-        if not API_KEY or API_KEY == "your_acoustid_api_key": return None
-
-        trimmed = path + "_trim.wav"
-        try:
-            # Melhoria: Normalizamos o áudio e cortamos 5s iniciais
-            # Isso ajuda se o volume da entrada USB estiver baixo
-            subprocess.run(["sox", "-q", path, trimmed, "remix", "1", "norm", "-3", "trim", "5", "18"], check=True)
-
-            cmd = ["fpcalc", "-json", trimmed]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            fp_data = json.loads(result.stdout)
-            
-            fingerprint = fp_data.get("fingerprint")
-            duration = fp_data.get("duration")
-
-            if not fingerprint: return None
-
-            url = "https://api.acoustid.org/v2/lookup"
-            payload = {
-                "format": "json",
-                "client": API_KEY,
-                "fingerprint": fingerprint,
-                "duration": int(duration),
-                "meta": "recordings releasegroups releases",
-            }
-
-            resp = self.session.post(url, data=payload, timeout=15)
-            response = resp.json()
-
-            if response.get("status") == "ok" and response.get("results"):
-                # Filtramos resultados com score > 0.1 (flexibilizando um pouco para vinil)
-                results = [r for r in response["results"] if r.get("score", 0) > 0.1]
-                if results:
-                    best = max(results, key=lambda x: x.get("score", 0))
-                    track = best["recordings"][0]
-                    title = track.get("title", "Desconhecido")
-                    
-                    # Log do score para debug
-                    logger.info(f"Identificado com Score: {best.get('score'):.2f}")
-
-                    rgs = track.get("releasegroups", [])
-                    if rgs:
-                        mbid = rgs[0].get("id")
-                        art_url = f"https://coverartarchive.org/release-group/{mbid}/front"
-                        img_res = self.session.get(art_url, timeout=10)
-                        if img_res.status_code == 200:
-                            return {"title": title, "img": img_res.content}
-            
-            return None
-        except Exception as e:
-            logger.error(f"Erro AcoustID: {e}")
-            return None
-        finally:
-            if os.path.exists(trimmed): os.unlink(trimmed)
-
     # ---------------- DSP DETECTION ----------------
     def is_music(self, path):
         try:
@@ -159,19 +100,15 @@ class MoodeAudioMonitor:
                 framerate = wf.getframerate()
                 n_frames = wf.getnframes()
                 raw_data = wf.readframes(n_frames)
-                
-                # Conversão segura de buffer para array
                 data = np.frombuffer(raw_data, dtype=np.int16).copy()
                 
-                if len(data) == 0:
-                    return False
+                if len(data) == 0: return False
 
                 if n_channels > 1:
                     data = data.reshape(-1, n_channels)
                     data = data.mean(axis=1).astype(np.int16)
 
             max_amp = np.max(np.abs(data))
-            # Se o som for extremamente baixo, nem processa FFT
             if max_amp < 500: 
                 logger.info(f"Sinal muito baixo (Amp={max_amp}). Pulando.")
                 return False
@@ -189,52 +126,62 @@ class MoodeAudioMonitor:
             logger.error(f"Erro DSP detalhado: {e}", exc_info=True)
             return False
 
-    # ---------------- ACOUSTID LOOKUP ----------------
+    # ---------------- ACOUSTID LOOKUP (Versão Unificada para Microfone) ----------------
     def get_artwork(self, path):
         if not API_KEY or API_KEY == "your_acoustid_api_key":
-            logger.error("API Key do AcoustID não configurada.")
+            logger.error("API Key não configurada.")
             return None
 
         trimmed = path + "_trim.wav"
         try:
-            # Corta os primeiros 5s (pode ser silêncio/agulha descendo)
-            subprocess.run(["sox", "-q", path, trimmed, "trim", "5", "15"], check=True)
+            # FILTROS PARA CAPTAÇÃO VIA MICROFONE:
+            # highpass/lowpass limpam o ruído ambiente e focam na melodia.
+            # norm -1 maximiza o volume para a API 'ouvir' melhor.
+            logger.info("Processando áudio para identificação (Filtro Anti-Ruído)...")
+            subprocess.run([
+                "sox", "-q", path, trimmed, 
+                "remix", "1", 
+                "highpass", "300", 
+                "lowpass", "4000", 
+                "norm", "-1", 
+                "trim", "5", "15"
+            ], check=True)
 
-            # Gera fingerprint e captura a duração exata do arquivo trimado
             cmd = ["fpcalc", "-json", trimmed]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            
             fp_data = json.loads(result.stdout)
+            
             fingerprint = fp_data.get("fingerprint")
             duration = fp_data.get("duration")
 
             if not fingerprint:
-                logger.error("Falha ao gerar fingerprint.")
                 return None
 
-            # Consulta AcoustID via POST (necessário para fingerprints longos)
             url = "https://api.acoustid.org/v2/lookup"
             payload = {
                 "format": "json",
                 "client": API_KEY,
                 "fingerprint": fingerprint,
                 "duration": int(duration),
-                "meta": "recordings releasegroups releases",
+                "meta": "recordings releasegroups",
+                "fuzzy": 1 # Busca aproximada para lidar com áudio externo
             }
 
+            # POST é obrigatório para fingerprints longos
             resp = self.session.post(url, data=payload, timeout=15)
             response = resp.json()
 
             if response.get("status") == "ok" and response.get("results"):
-                # Pega o resultado com maior score
-                best = max(response["results"], key=lambda x: x.get("score", 0))
-                score = best.get("score", 0)
+                # Score reduzido para 0.05 para compensar a perda de qualidade do microfone
+                results = [r for r in response["results"] if r.get("score", 0) > 0.05]
                 
-                if score > 0.15 and best.get("recordings"):
+                if results:
+                    best = max(results, key=lambda x: x.get("score", 0))
+                    logger.info(f"Sucesso! Confiança da identificação: {int(best.get('score')*100)}%")
+                    
                     track = best["recordings"][0]
                     title = track.get("title", "Desconhecido")
                     
-                    # Tenta obter MBID do Release Group para a capa
                     rgs = track.get("releasegroups", [])
                     if rgs:
                         mbid = rgs[0].get("id")
@@ -243,7 +190,7 @@ class MoodeAudioMonitor:
                         if img_res.status_code == 200:
                             return {"title": title, "img": img_res.content}
             
-            logger.info("Música não identificada ou score baixo.")
+            logger.info("AcoustID: Não foi possível identificar esta amostra.")
             return None
 
         except Exception as e:
@@ -259,7 +206,6 @@ class MoodeAudioMonitor:
             if not pygame.display.get_init():
                 pygame.display.init()
             
-            # Oculta o cursor do mouse (útil em telas touch de 7")
             pygame.mouse.set_visible(False)
             screen = pygame.display.set_mode(DISPLAY_RES)
             
@@ -271,7 +217,6 @@ class MoodeAudioMonitor:
             pygame.display.flip()
             
             logger.info(f"Exibindo capa: {art_data['title']}")
-            # Mantém a capa por um tempo antes de liberar para o próximo ciclo
             time.sleep(30) 
             
         except Exception as e:
