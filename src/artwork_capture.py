@@ -105,11 +105,16 @@ class MoodeAudioMonitor:
                 "client": API_KEY,
                 "fingerprint": fingerprint,
                 "duration": int(RECORD_SECONDS),
-                "meta": "recordings releasegroups"
+                "meta": "recordings releasegroups releases tracks",
+                "fuzzy": 1
             }
             
             resp = self.session.post(url, data=data, timeout=10)
             response = resp.json()
+
+            # Isso vai nos mostrar se o servidor achou algo com score baixo
+            if response.get('status') == 'ok' and not response.get('results'):
+                 logger.warning(f"Servidor recebeu o sinal, mas o score foi abaixo do limite para {RECORD_SECONDS}s.")
             
             if response.get('status') == 'ok' and response.get('results'):
                 # Ordenar por score para garantir a melhor correspondência
