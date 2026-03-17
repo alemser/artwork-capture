@@ -58,7 +58,7 @@ class MoodeAudioMonitor:
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
             path = tmp.name
         
-        # Gravamos normalmente
+        # Gravamos o áudio bruto
         cmd = [
             'arecord', '-D', f'hw:{MIC_DEVICE_INDEX},0', 
             '-f', 'S16_LE', '-c', '1', '-r', '44100', 
@@ -68,14 +68,14 @@ class MoodeAudioMonitor:
         try:
             subprocess.run(cmd, capture_output=True, timeout=RECORD_SECONDS + 5)
             
-            # --- NOVO: Aumentar volume digitalmente em 10x ---
-            # Isso ajuda o AcoustID a "ouvir" melhor o seu Rega
+            # --- AJUSTE: Normalizar e converter para 16kHz (Otimizado para AcoustID) ---
+            path_fixed = path + "_fixed.wav"
             try:
-                # Se tiver o sox instalado: sudo apt install sox
-                subprocess.run(['sox', '-v', '5.0', path, path + '_loud.wav'], capture_output=True)
-                os.rename(path + '_loud.wav', path)
-            except:
-                pass 
+                # Normaliza o volume e converte a taxa de amostragem
+                subprocess.run(['sox', path, '-r', '16000', '-c', '1', path_fixed, 'norm', '-3'], capture_output=True)
+                os.rename(path_fixed, path)
+            except Exception as e:
+                logger.warning(f"Sox não converteu, usando bruto: {e}")
                 
             return path
         except Exception as e:
