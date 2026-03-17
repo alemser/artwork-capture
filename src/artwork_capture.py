@@ -69,7 +69,10 @@ def record_audio():
         frames = []
 
         for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-            data = stream.read(CHUNK)
+            data = stream.read(CHUNK, exception_on_overflow=False)
+            if not data:
+                logger.warning("Audio buffer overflow detected, skipping chunk")
+                continue
             frames.append(data)
 
         logger.info("Finished recording.")
