@@ -74,28 +74,41 @@ class MoodeAudioMonitor:
 
     # ---------------- AUDIO CAPTURE ----------------
     def record_audio(self):
-        # Usamos um prefixo fixo para facilitar o rastreio manual se necessário
         fd, path = tempfile.mkstemp(suffix=".wav", prefix="moode_rec_")
         os.close(fd) 
 
-        cmd = [
-            "arecord",
-            "-D", f"hw:{MIC_DEVICE_INDEX},0",
-            "-f", "S16_LE",
-            "-c", "2",
-            "-r", "44100",
-            "-d", str(RECORD_SECONDS),
-            path
+        # Tentativa 1: Stereo (seu padrão atual)
+        # Tentativa 2: Mono (muitas placas USB PnP só aceitam mono)
+        configs = [
+            ["-c", "2", "-r", "44100"],
+            ["-c", "1", "-r", "44100"],
+            ["-c", "1", "-r", "16000"] # Fallback para voz/baixa qualidade
         ]
 
-        try:
-            logger.info(f"Iniciando gravação de {RECORD_SECONDS}s...")
-            subprocess.run(cmd, capture_output=True, timeout=RECORD_SECONDS + 5, check=True)
-            return path
-        except Exception as e:
-            logger.error(f"Erro no arecord: {e}")
-            if os.path.exists(path): os.unlink(path)
-            return None
+        for cfg in configs:
+            cmd = [
+                "arecord",
+                "-D", f"hw:{MIC_DEVICE_INDEX},0",
+                "-f", "S16_LE",
+                *cfg,
+                "-d", str(RECORD_SECONDS),
+                path
+            ]
+            
+            try:
+                logger.info(f"Tentando gravar com {' Stereo' if cfg[1]=='2' else ' Mono'}...")
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=RECORD_SECONDS + 5)
+                
+                if result.returncode == 0:
+                    return path
+                else:
+                    logger.warning(f"Falha na config {cfg}: {result.stderr.strip()}")
+            except Exception as e:
+                logger.error(f"Erro ao rodar arecord: {e}")
+
+        # Se chegou aqui, todas as tentativas falharam
+        if os.path.exists(path): os.unlink(path)
+        return None
 
     # ---------------- DSP DETECTION ----------------
     def is_music(self, path):
