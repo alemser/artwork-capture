@@ -14,7 +14,7 @@ from datetime import datetime
 import signal
 
 # Configuration
-MIC_DEVICE_INDEX = 1  # Adjust based on your setup (likely 1 for USB microphone)
+MIC_DEVICE_INDEX = 3  # ALSA card number for microphone (from arecord -l)
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
@@ -57,56 +57,43 @@ def timeout_handler(signum, frame):
     raise TimeoutError("Recording timed out")
 
 def record_audio():
-    def _record():
-        logger.info(f"Attempting to record from device index {MIC_DEVICE_INDEX}")
-        p = pyaudio.PyAudio()
-        stream = p.open(format=FORMAT,
-                        channels=CHANNELS,
-                        rate=RATE,
-                        input=True,
-                        input_device_index=MIC_DEVICE_INDEX,
-                        frames_per_buffer=CHUNK)
-
-        logger.info("Recording...")
-        frames = []
-
-        for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-            data = stream.read(CHUNK, exception_on_overflow=False)
-            if not data:
-                logger.warning("Audio buffer overflow detected, skipping chunk")
-                continue
-            frames.append(data)
-
-        logger.info("Finished recording.")
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-
-        return b''.join(frames)
-
+    logger.info(f"Attempting to record from ALSA device hw:{MIC_DEVICE_INDEX},0")
+    
+    # Use arecord to record 10 seconds
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+        temp_path = temp_file.name
+    
+    cmd = [
+        'arecord',
+        '-D', f'hw:{MIC_DEVICE_INDEX},0',  # Device
+        '-f', 'S16_LE',  # Format
+        '-c', str(CHANNELS),  # Channels
+        '-r', str(RATE),  # Rate
+        '-d', str(RECORD_SECONDS),  # Duration
+        temp_path
+    ]
+    
     try:
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(RECORD_SECONDS + 10)  # Timeout a bit longer than recording
-        result = _record()
-        signal.alarm(0)  # Cancel alarm
-        return result
-    except (Exception, TimeoutError) as e:
-        logger.error(f"Error recording audio: {e}")
-        signal.alarm(0)  # Ensure alarm is cancelled
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=RECORD_SECONDS + 5)
+        if result.returncode != 0:
+            logger.error(f"arecord failed: {result.stderr}")
+            os.unlink(temp_path)
+            return None
+        
+        logger.info("Finished recording.")
+        return temp_path  # Return the file path
+    except subprocess.TimeoutExpired:
+        logger.error("Recording timed out")
+        os.unlink(temp_path)
+        return None
+    except Exception as e:
+        logger.error(f"Error in recording: {e}")
+        os.unlink(temp_path)
         return None
 
-def fingerprint_audio(audio_data):
+def fingerprint_audio(audio_file_path):
     try:
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
-            temp_path = temp_file.name
-            with wave.open(temp_path, 'wb') as wf:
-                wf.setnchannels(CHANNELS)
-                wf.setsampwidth(2)  # 16-bit
-                wf.setframerate(RATE)
-                wf.writeframes(audio_data)
-
-        duration, fp = acoustid.fingerprint_file(temp_path)
-        os.unlink(temp_path)
+        duration, fp = acoustid.fingerprint_file(audio_file_path)
         return fp
     except Exception as e:
         logger.error(f"Error fingerprinting audio: {e}")
@@ -246,28 +233,35 @@ def headless_mode(client):
             logger.debug("Streaming via Moode detected - skipping analog source check")
         else:
             # Check for analog source
-            audio_data = record_audio()
-            if audio_data and has_audio(audio_data):
+            audio_file = record_audio()
+            if audio_file and has_audio(audio_file):
                 logger.info("Audio detected from analog source")
-                fp = fingerprint_audio(audio_data)
+                fp = fingerprint_audio(audio_file)
                 if fp:
                     recording = get_metadata(fp)
                     if recording:
                         log_detected_music(recording, source='vinyl/CD')
                     else:
                         logger.info("DETECTED | Source: vinyl/CD | Music not found in database")
+                os.unlink(audio_file)
             else:
-                logger.debug("No audio detected - silence")
+                logger.debug("No audio detected - silence or recording failed")
         
         time.sleep(30)  # Check every 30 seconds
 
-def has_audio(audio_data):
-    # Check if the audio has significant sound
-    import struct
-    data = struct.unpack('<' + 'h' * (len(audio_data) // 2), audio_data)
-    max_amplitude = max(abs(sample) for sample in data)
-    threshold = 1000  # Adjust based on mic sensitivity
-    return max_amplitude > threshold
+def has_audio(audio_file_path):
+    try:
+        with wave.open(audio_file_path, 'rb') as wf:
+            frames = wf.readframes(wf.getnframes())
+        # Check if the audio has significant sound
+        import struct
+        data = struct.unpack('<' + 'h' * (len(frames) // 2), frames)
+        max_amplitude = max(abs(sample) for sample in data)
+        threshold = 1000  # Adjust based on mic sensitivity
+        return max_amplitude > threshold
+    except Exception as e:
+        logger.error(f"Error checking audio: {e}")
+        return False
 
 def main():
     logger.info("Starting Artwork Capture")
@@ -321,11 +315,11 @@ def main():
 
         if not is_streaming:
             # Check for analog playback
-            audio_data = record_audio()
-            if audio_data:
-                if has_audio(audio_data):
+            audio_file = record_audio()
+            if audio_file:
+                if has_audio(audio_file):
                     logger.info("Audio detected from analog source")
-                    fp = fingerprint_audio(audio_data)
+                    fp = fingerprint_audio(audio_file)
                     if fp:
                         recording = get_metadata(fp)
                         if recording:
@@ -334,6 +328,7 @@ def main():
                                 display_image(artwork)
                 else:
                     logger.debug("No significant audio detected, skipping")
+                os.unlink(audio_file)
             else:
                 logger.warning("Failed to record audio")
         time.sleep(30)  # Check every 30 seconds
