@@ -76,8 +76,8 @@ class MoodeAudioMonitor:
 
         # Tentamos Mono primeiro, que é o que seu hardware USB PnP aceita
         configs = [
-            ["-c", "1", "-r", "44100"],
-            ["-c", "2", "-r", "44100"]
+            ["-c", "1", "-r", "48000"], # Testar 48k como prioridade
+            ["-c", "1", "-r", "44100"]
         ]
 
         for cfg in configs:
@@ -138,14 +138,15 @@ class MoodeAudioMonitor:
             # Abrimos o highpass para 150Hz (mais corpo) 
             # Abrimos o lowpass para 10000Hz (mais detalhes/agudos)
             # Isso torna o fingerprint muito mais único para a API
-            logger.info("Refinando áudio para identificação aérea...")
+            logger.info("Corrigindo Sample Rate e limpando áudio...")
             subprocess.run([
                 "sox", "-q", path, trimmed, 
-                "remix", "1", 
-                "highpass", "150", 
-                "lowpass", "10000", 
-                "norm", "-1", 
-                "trim", "3", "17" # Pulamos menos e pegamos um trecho maior (14s)
+                "remix", "1",           # Garante Mono
+                "rate", "16k",          # REAMOSTRAGEM CRÍTICA: Resolve o problema da lentidão
+                "highpass", "200",      # Remove ruído de baixa frequência
+                "lowpass", "6000",      # Foca na voz da Sade e instrumentos
+                "norm", "-1",           # Maximiza o volume
+                "trim", "5", "15"       # Pega 15 segundos de música
             ], check=True)
 
             # --- COPIAR PARA PASTA DE TESTE ---
