@@ -110,26 +110,27 @@ class MoodeAudioMonitor:
             return None
             
         trimmed = path + "_trim.wav"
+        # Local fixo para você baixar via SCP: /home/alemser/test_ident.wav
         debug_path = os.path.join(os.path.expanduser("~"), "test_ident.wav")
         
         try:
-            logger.info("Gerando fingerprint de alta precisão...")
-            # Deixamos o áudio mais natural (highpass menor e lowpass maior)
-            # Isso mantém as características que o AcoustID usa
+            logger.info("Processando áudio (Resample 16k + Filtros)...")
+            # Aumentamos o trim para 20 segundos de amostra para facilitar o match
             subprocess.run([
                 "sox", "-q", path, trimmed, 
                 "remix", "1", 
                 "rate", "16k", 
-                "highpass", "100", 
-                "lowpass", "7500", 
+                "highpass", "150", 
+                "lowpass", "7000", 
                 "norm", "-1", 
-                "trim", "2", "20" # Pulamos só 2s e pegamos 20s de música
+                "trim", "5", "20" 
             ], check=True)
 
+            # --- VOLTA DA CÓPIA DE DEBUG ---
             subprocess.run(["cp", trimmed, debug_path])
+            logger.info(f"Cópia de debug gerada em: {debug_path}")
 
-            # Usamos o fpcalc com a opção -length para garantir uma assinatura longa
-            cmd = ["fpcalc", "-json", "-length", "20", trimmed]
+            cmd = ["fpcalc", "-json", trimmed]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             fp_data = json.loads(result.stdout)
             
@@ -139,25 +140,24 @@ class MoodeAudioMonitor:
                 "client": API_KEY,
                 "fingerprint": fp_data.get("fingerprint"),
                 "duration": int(fp_data.get("duration")),
-                "meta": "recordings releasegroups releases tracks compress", # Adicionado compress e tracks
-                "fuzzy": 1 
+                "meta": "recordings releasegroups",
+                "fuzzy": 2 
             }
 
             resp = self.session.post(url, data=payload, timeout=15)
             response = resp.json()
             
-            logger.info(f"AcoustID Resposta completa: {response.get('status')}")
+            status = response.get("status")
+            results = response.get("results", [])
+            logger.info(f"AcoustID Status: {status} | Resultados: {len(results)}")
 
-            if response.get("status") == "ok" and response.get("results"):
-                # Se houver QUALQUER resultado, vamos tentar exibir
-                results = response.get("results")
-                best = max(results, key=lambda x: x.get("score", 0))
-                
-                # Mesmo com score muito baixo, vamos tentar, pois o áudio está bom
-                if best.get("score", 0) > 0.02: 
+            if status == "ok" and results:
+                valid_results = [r for r in results if r.get("score", 0) > 0.05]
+                if valid_results:
+                    best = max(valid_results, key=lambda x: x.get("score", 0))
                     track = best["recordings"][0]
                     title = track.get("title", "Desconhecido")
-                    logger.info(f"🎯 SUCESSO: {title} (Score: {best.get('score'):.2f})")
+                    logger.info(f"🎯 IDENTIFICADO: {title} ({int(best.get('score')*100)}%)")
 
                     rgs = track.get("releasegroups", [])
                     if rgs:
@@ -167,7 +167,6 @@ class MoodeAudioMonitor:
                         if img_res.status_code == 200:
                             return {"title": title, "img": img_res.content}
             
-            logger.info("AcoustID: Áudio bom, mas sem match no banco de dados.")
             return None
         except Exception as e:
             logger.error(f"Erro no Lookup: {e}")
