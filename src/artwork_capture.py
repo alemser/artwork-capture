@@ -96,7 +96,7 @@ class MoodeAudioMonitor:
                 timeout=RECORD_SECONDS + 5
             )
 
-            logger.info("Áudio gravado ", path)
+            logger.info("Áudio gravado " + path)
 
             return path
 
