@@ -83,21 +83,30 @@ class MoodeAudioMonitor:
             return False
 
     def get_artwork(self, path):
-        # --- NOVO: Normalização de volume via software ---
+        if API_KEY == 'your_acoustid_api_key' or not API_KEY:
+            logger.error("ERRO: Voce precisa configurar sua API_KEY do AcoustID!")
+            return None
+
         try:
-            # Aumenta o volume do arquivo gravado antes de enviar para o reconhecimento
-            subprocess.run(['sox', path, path, 'norm', '-1'], capture_output=True)
-        except:
-            pass # Se não tiver o 'sox' instalado, ele segue normalmente
-        # -------------------------------------------------
-        
-        try:
+            # Fingerprint local
             duration, fp = acoustid.fingerprint_file(path)
+            
+            # Consulta ao servidor
             res = acoustid.lookup(API_KEY, fp, duration)
-            if res['results']:
-                recs = res['results'][0].get('recordings', [])
+            
+            # Verifica se o servidor retornou erro (ex: chave invalida)
+            if res.get('status') != 'ok':
+                logger.error(f"Erro no Servidor AcoustID: {res.get('error', 'Desconhecido')}")
+                return None
+
+            if 'results' in res and res['results']:
+                best_match = res['results'][0]
+                recs = best_match.get('recordings', [])
                 if recs:
-                    title = recs[0].get('title')
+                    title = recs[0].get('title', 'Unknown')
+                    artist = recs[0].get('artists', [{}])[0].get('name', 'Unknown')
+                    logger.info(f"Identificado: {artist} - {title}")
+                    
                     rgs = recs[0].get('releasegroups', [])
                     if rgs:
                         mbid = rgs[0].get('id')
@@ -105,9 +114,11 @@ class MoodeAudioMonitor:
                         img_res = self.session.get(url, timeout=5)
                         if img_res.status_code == 200:
                             return {"title": title, "img": img_res.content}
+            else:
+                logger.info("Musica ouvida, mas nao encontrada no banco de dados.")
             return None
         except Exception as e:
-            logger.error(f"Erro AcoustID: {e}")
+            logger.error(f"Erro no Processo AcoustID: {e}")
             return None
 
     def display_image(self, art_data):
