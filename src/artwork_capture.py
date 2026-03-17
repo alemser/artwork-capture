@@ -77,38 +77,79 @@ class MoodeAudioMonitor:
         fd, path = tempfile.mkstemp(suffix=".wav", prefix="moode_rec_")
         os.close(fd) 
 
-        # Tentativa 1: Stereo (seu padrão atual)
-        # Tentativa 2: Mono (muitas placas USB PnP só aceitam mono)
+        # Ordem de tentativa: Mono 44.1k é a que funcionou no seu log
         configs = [
-            ["-c", "2", "-r", "44100"],
             ["-c", "1", "-r", "44100"],
-            ["-c", "1", "-r", "16000"] # Fallback para voz/baixa qualidade
+            ["-c", "2", "-r", "44100"]
         ]
 
         for cfg in configs:
-            cmd = [
-                "arecord",
-                "-D", f"hw:{MIC_DEVICE_INDEX},0",
-                "-f", "S16_LE",
-                *cfg,
-                "-d", str(RECORD_SECONDS),
-                path
-            ]
-            
+            cmd = ["arecord", "-D", f"hw:{MIC_DEVICE_INDEX},0", "-f", "S16_LE", *cfg, "-d", str(RECORD_SECONDS), path]
             try:
-                logger.info(f"Tentando gravar com {' Stereo' if cfg[1]=='2' else ' Mono'}...")
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=RECORD_SECONDS + 5)
-                
                 if result.returncode == 0:
                     return path
-                else:
-                    logger.warning(f"Falha na config {cfg}: {result.stderr.strip()}")
-            except Exception as e:
-                logger.error(f"Erro ao rodar arecord: {e}")
+            except Exception:
+                continue
 
-        # Se chegou aqui, todas as tentativas falharam
         if os.path.exists(path): os.unlink(path)
         return None
+
+    def get_artwork(self, path):
+        if not API_KEY or API_KEY == "your_acoustid_api_key": return None
+
+        trimmed = path + "_trim.wav"
+        try:
+            # Melhoria: Normalizamos o áudio e cortamos 5s iniciais
+            # Isso ajuda se o volume da entrada USB estiver baixo
+            subprocess.run(["sox", "-q", path, trimmed, "remix", "1", "norm", "-3", "trim", "5", "18"], check=True)
+
+            cmd = ["fpcalc", "-json", trimmed]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            fp_data = json.loads(result.stdout)
+            
+            fingerprint = fp_data.get("fingerprint")
+            duration = fp_data.get("duration")
+
+            if not fingerprint: return None
+
+            url = "https://api.acoustid.org/v2/lookup"
+            payload = {
+                "format": "json",
+                "client": API_KEY,
+                "fingerprint": fingerprint,
+                "duration": int(duration),
+                "meta": "recordings releasegroups releases",
+            }
+
+            resp = self.session.post(url, data=payload, timeout=15)
+            response = resp.json()
+
+            if response.get("status") == "ok" and response.get("results"):
+                # Filtramos resultados com score > 0.1 (flexibilizando um pouco para vinil)
+                results = [r for r in response["results"] if r.get("score", 0) > 0.1]
+                if results:
+                    best = max(results, key=lambda x: x.get("score", 0))
+                    track = best["recordings"][0]
+                    title = track.get("title", "Desconhecido")
+                    
+                    # Log do score para debug
+                    logger.info(f"Identificado com Score: {best.get('score'):.2f}")
+
+                    rgs = track.get("releasegroups", [])
+                    if rgs:
+                        mbid = rgs[0].get("id")
+                        art_url = f"https://coverartarchive.org/release-group/{mbid}/front"
+                        img_res = self.session.get(art_url, timeout=10)
+                        if img_res.status_code == 200:
+                            return {"title": title, "img": img_res.content}
+            
+            return None
+        except Exception as e:
+            logger.error(f"Erro AcoustID: {e}")
+            return None
+        finally:
+            if os.path.exists(trimmed): os.unlink(trimmed)
 
     # ---------------- DSP DETECTION ----------------
     def is_music(self, path):
