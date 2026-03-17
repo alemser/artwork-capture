@@ -96,48 +96,47 @@ class MoodeAudioMonitor:
             return False
 
     def get_artwork(self, path):
-        if API_KEY == 'your_acoustid_api_key':
-            logger.error("API_KEY não configurada!")
+        if API_KEY == 'your_acoustid_api_key' or not API_KEY:
+            logger.error("ERRO: API_KEY não configurada no topo do arquivo!")
             return None
 
         try:
-            # Gerar fingerprint
+            # Gerar fingerprint (garantindo o formato que o servidor prefere)
             cmd = ['fpcalc', '-plain', path]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             if result.returncode != 0:
-                logger.error("Erro ao rodar fpcalc. Verifique a instalação.")
+                logger.error(f"Erro no fpcalc: {result.stderr}")
                 return None
             
             fingerprint = result.stdout.strip()
             
-            # Consulta
+            # Consulta via POST (mais robusto para fingerprints longos)
             url = "https://api.acoustid.org/v2/lookup"
-            params = {
+            data = {
+                "format": "json",
                 "client": API_KEY,
                 "code": fingerprint,
-                "duration": RECORD_SECONDS,
-                "meta": "recordings releasegroups",
-                "fuzzy": 1
+                "duration": int(RECORD_SECONDS),
+                "meta": "recordings releasegroups"
             }
             
-            response = self.session.get(url, params=params, timeout=10).json()
+            # Usamos POST em vez de GET para evitar limites de URL
+            resp = self.session.post(url, data=data, timeout=10)
+            response = resp.json()
             
-            # --- LOG DE DIAGNÓSTICO ---
-            logger.info(f"Status da Resposta: {response.get('status')}")
-            if 'results' in response and response['results']:
-                score = response['results'][0].get('score')
-                logger.info(f"Melhor Score encontrado: {score}")
-            else:
-                logger.info("Nenhum resultado retornado pelo servidor.")
-            # --------------------------
+            if response.get('status') != 'ok':
+                # EXIBE O ERRO REAL DO SERVIDOR
+                error_msg = response.get('error', {}).get('message', 'Erro desconhecido')
+                logger.error(f"Resposta do AcoustID: {response.get('status')} - {error_msg}")
+                return None
 
-            if response.get('status') == 'ok' and response.get('results'):
+            if response.get('results'):
                 best = response['results'][0]
                 if best.get('recordings'):
                     track = best['recordings'][0]
-                    artist = track.get('artists', [{}])[0].get('name', 'Desconhecido')
-                    title = track.get('title', 'Sem Título')
-                    logger.info(f"!!! SUCESSO: {artist} - {title}")
+                    artist = track.get('artists', [{}])[0].get('name', 'Unknown')
+                    title = track.get('title', 'Unknown')
+                    logger.info(f"!!! SUCESSO: {artist} - {title} (Confiança: {int(best['score']*100)}%)")
                     
                     # Busca da capa
                     rgs = track.get('releasegroups', [])
@@ -147,6 +146,8 @@ class MoodeAudioMonitor:
                         img_res = self.session.get(art_url, timeout=5)
                         if img_res.status_code == 200:
                             return {"title": title, "img": img_res.content}
+            else:
+                logger.info("Nenhuma música correspondente encontrada.")
             return None
         except Exception as e:
             logger.error(f"Erro no Processo: {e}")
