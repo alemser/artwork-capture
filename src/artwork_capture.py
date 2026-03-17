@@ -8,12 +8,14 @@ import numpy as np
 import wave
 import pygame
 import json
+import io
 from mpd import MPDClient, ConnectionError
 from scipy import signal
 
-# --- CONFIGURACOES ---
+# --- CONFIGURAÇÕES ---
 MIC_DEVICE_INDEX = 3
 RECORD_SECONDS = 25
+# Substitua pela sua chave real ou defina no ambiente
 API_KEY = os.environ.get("ACOUSTID_API_KEY", "your_acoustid_api_key")
 
 DISPLAY_RES = (800, 480)
@@ -24,12 +26,9 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
-
 logger = logging.getLogger(__name__)
 
-
 class MoodeAudioMonitor:
-
     def __init__(self):
         self.client = MPDClient()
         self.session = requests.Session()
@@ -42,46 +41,60 @@ class MoodeAudioMonitor:
             self.client.connect("localhost", 6600)
             self.mpd_connected = True
             logger.info("Conectado ao MPD.")
-        except Exception:
+        except Exception as e:
+            logger.error(f"Falha ao conectar ao MPD: {e}")
             self.mpd_connected = False
 
     def should_scan_analog(self):
         try:
+            # Tenta um ping para verificar se a conexão ainda está ativa
+            if self.mpd_connected:
+                try:
+                    self.client.ping()
+                except ConnectionError:
+                    self.mpd_connected = False
+
             if not self.mpd_connected:
                 self.connect_mpd()
 
-            status = self.client.status()
+            if not self.mpd_connected:
+                return True # Se não consegue conectar, assume modo analógico
 
+            status = self.client.status()
+            # Se o MPD está tocando algo com título, não escaneamos o analógico
             if status.get("state") == "play":
                 song = self.client.currentsong()
                 if song and "title" in song:
                     return False
             return True
-        except (ConnectionError, Exception):
+        except Exception as e:
+            logger.warning(f"Erro ao checar status MPD: {e}")
             self.mpd_connected = False
             return True
 
     # ---------------- AUDIO CAPTURE ----------------
     def record_audio(self):
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            path = tmp.name
+        # Usamos um prefixo fixo para facilitar o rastreio manual se necessário
+        fd, path = tempfile.mkstemp(suffix=".wav", prefix="moode_rec_")
+        os.close(fd) 
 
         cmd = [
             "arecord",
             "-D", f"hw:{MIC_DEVICE_INDEX},0",
             "-f", "S16_LE",
-            "-c", "2",             # grava stereo
-            "-r", "44100",         # sample rate ideal
+            "-c", "2",
+            "-r", "44100",
             "-d", str(RECORD_SECONDS),
             path
         ]
 
         try:
-            subprocess.run(cmd, capture_output=True, timeout=RECORD_SECONDS + 5)
-            logger.info(f"Áudio gravado: {path}")
+            logger.info(f"Iniciando gravação de {RECORD_SECONDS}s...")
+            subprocess.run(cmd, capture_output=True, timeout=RECORD_SECONDS + 5, check=True)
             return path
         except Exception as e:
             logger.error(f"Erro no arecord: {e}")
+            if os.path.exists(path): os.unlink(path)
             return None
 
     # ---------------- DSP DETECTION ----------------
@@ -90,102 +103,123 @@ class MoodeAudioMonitor:
             with wave.open(path, "rb") as wf:
                 n_channels = wf.getnchannels()
                 framerate = wf.getframerate()
-                data = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+                n_frames = wf.getnframes()
+                raw_data = wf.readframes(n_frames)
+                
+                # Conversão segura de buffer para array
+                data = np.frombuffer(raw_data, dtype=np.int16).copy()
+                
+                if len(data) == 0:
+                    return False
+
                 if n_channels > 1:
                     data = data.reshape(-1, n_channels)
                     data = data.mean(axis=1).astype(np.int16)
 
             max_amp = np.max(np.abs(data))
-            freqs, psd = signal.welch(data, fs=framerate)
-            music_ratio = np.sum(psd > (np.max(psd) * 0.01)) / len(psd)
+            # Se o som for extremamente baixo, nem processa FFT
+            if max_amp < 500: 
+                logger.info(f"Sinal muito baixo (Amp={max_amp}). Pulando.")
+                return False
 
-            logger.info(f"Sinal: Amp={max_amp} | Ratio={music_ratio:.4f}")
+            freqs, psd = signal.welch(data, fs=framerate)
+            max_psd = np.max(psd)
+            if max_psd == 0: return False
+
+            music_ratio = np.sum(psd > (max_psd * 0.01)) / len(psd)
+            logger.info(f"DSP Check: Amp={max_amp} | Ratio={music_ratio:.4f}")
+            
             return music_ratio > THRESHOLD_RATIO
+
         except Exception as e:
-            logger.error(f"Erro DSP: {e}")
+            logger.error(f"Erro DSP detalhado: {e}", exc_info=True)
             return False
 
     # ---------------- ACOUSTID LOOKUP ----------------
     def get_artwork(self, path):
         if not API_KEY or API_KEY == "your_acoustid_api_key":
+            logger.error("API Key do AcoustID não configurada.")
             return None
 
+        trimmed = path + "_trim.wav"
         try:
-            # Trim inicial de 5s para evitar silêncio
-            trimmed = path + "_trim.wav"
-            subprocess.run(["sox", path, trimmed, "trim", "5"])
-            path = trimmed
+            # Corta os primeiros 5s (pode ser silêncio/agulha descendo)
+            subprocess.run(["sox", "-q", path, trimmed, "trim", "5", "15"], check=True)
 
-            # Gerar fingerprint
-            cmd = ["fpcalc", "-json", path]
+            # Gera fingerprint e captura a duração exata do arquivo trimado
+            cmd = ["fpcalc", "-json", trimmed]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            if result.returncode != 0:
-                logger.error("Erro executando fpcalc.")
-                return None
+            
+            fp_data = json.loads(result.stdout)
+            fingerprint = fp_data.get("fingerprint")
+            duration = fp_data.get("duration")
 
-            data = json.loads(result.stdout)
-            fingerprint = data.get("fingerprint")
             if not fingerprint:
-                logger.error("Fingerprint não gerado.")
+                logger.error("Falha ao gerar fingerprint.")
                 return None
-            logger.info("Fingerprint gerado.")
 
-            # Consulta AcoustID
+            # Consulta AcoustID via POST (necessário para fingerprints longos)
             url = "https://api.acoustid.org/v2/lookup"
             payload = {
                 "format": "json",
                 "client": API_KEY,
                 "fingerprint": fingerprint,
-                "duration": RECORD_SECONDS,
-                "meta": "recordings releasegroups releases tracks",
-                "fuzzy": 1
+                "duration": int(duration),
+                "meta": "recordings releasegroups releases",
             }
 
-            logger.info(json.dumps(payload)[:200])
-            resp = self.session.get(url, params=payload, timeout=10)
-            logger.info(resp.text[:500])
+            resp = self.session.post(url, data=payload, timeout=15)
             response = resp.json()
 
-            if response.get("status") == "ok" and not response.get("results"):
-                logger.warning("Servidor recebeu o sinal, mas score baixo.")
-
             if response.get("status") == "ok" and response.get("results"):
+                # Pega o resultado com maior score
                 best = max(response["results"], key=lambda x: x.get("score", 0))
                 score = best.get("score", 0)
-                logger.info(f"Melhor score: {score:.2f}")
-
-                if score > 0.2 and best.get("recordings"):
+                
+                if score > 0.15 and best.get("recordings"):
                     track = best["recordings"][0]
-                    artist = track.get("artists", [{}])[0].get("name", "Desconhecido")
                     title = track.get("title", "Desconhecido")
-                    logger.info(f"IDENTIFICADO: {artist} - {title} (Score: {int(score*100)}%)")
-
+                    
+                    # Tenta obter MBID do Release Group para a capa
                     rgs = track.get("releasegroups", [])
                     if rgs:
                         mbid = rgs[0].get("id")
                         art_url = f"https://coverartarchive.org/release-group/{mbid}/front"
-                        img_res = self.session.get(art_url, timeout=5)
+                        img_res = self.session.get(art_url, timeout=10)
                         if img_res.status_code == 200:
                             return {"title": title, "img": img_res.content}
-
+            
+            logger.info("Música não identificada ou score baixo.")
             return None
+
         except Exception as e:
             logger.error(f"Erro AcoustID: {e}")
             return None
+        finally:
+            if os.path.exists(trimmed):
+                os.unlink(trimmed)
 
     # ---------------- DISPLAY ----------------
     def display_image(self, art_data):
         try:
             if not pygame.display.get_init():
                 pygame.display.init()
+            
+            # Oculta o cursor do mouse (útil em telas touch de 7")
+            pygame.mouse.set_visible(False)
             screen = pygame.display.set_mode(DISPLAY_RES)
-            import io
-            img = pygame.image.load(io.BytesIO(art_data["img"]))
+            
+            img_byte = io.BytesIO(art_data["img"])
+            img = pygame.image.load(img_byte)
             img = pygame.transform.scale(img, DISPLAY_RES)
+            
             screen.blit(img, (0, 0))
             pygame.display.flip()
-            logger.info(f"Exibindo: {art_data['title']}")
-            time.sleep(25)
+            
+            logger.info(f"Exibindo capa: {art_data['title']}")
+            # Mantém a capa por um tempo antes de liberar para o próximo ciclo
+            time.sleep(30) 
+            
         except Exception as e:
             logger.error(f"Erro display: {e}")
         finally:
@@ -193,18 +227,26 @@ class MoodeAudioMonitor:
 
     # ---------------- MAIN LOOP ----------------
     def start(self):
-        logger.info("Monitor Analógico Iniciado.")
+        logger.info("Monitor Analógico Moode Audio Iniciado.")
         while True:
-            if self.should_scan_analog():
-                path = self.record_audio()
-                if path:
-                    if self.is_music(path):
-                        art = self.get_artwork(path)
-                        if art:
-                            self.display_image(art)
-                    os.unlink(path)
-            time.sleep(CHECK_INTERVAL)
-
+            try:
+                if self.should_scan_analog():
+                    path = self.record_audio()
+                    if path:
+                        if self.is_music(path):
+                            art = self.get_artwork(path)
+                            if art:
+                                self.display_image(art)
+                        
+                        if os.path.exists(path):
+                            os.unlink(path)
+                
+                time.sleep(CHECK_INTERVAL)
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                logger.error(f"Erro no loop principal: {e}")
+                time.sleep(CHECK_INTERVAL)
 
 # ---------------- MAIN ----------------
 if __name__ == "__main__":
