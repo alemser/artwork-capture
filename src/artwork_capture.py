@@ -19,7 +19,10 @@ API_KEY = os.environ.get("ACOUSTID_API_KEY", "your_acoustid_api_key")
 
 DISPLAY_RES = (800, 480)
 CHECK_INTERVAL = 5 
-THRESHOLD_RATIO = 0.02
+
+# Revertido para os valores mais sensíveis conforme solicitado
+THRESHOLD_RATIO = 0.02  
+MIN_AMPLITUDE = 500    
 
 logging.basicConfig(
     level=logging.INFO,
@@ -94,12 +97,17 @@ class MoodeAudioMonitor:
                     data = data.reshape(-1, params.nchannels).mean(axis=1).astype(np.int16)
 
             max_amp = np.max(np.abs(data))
-            if max_amp < 500: return False
+            
+            # Filtro de amplitude revertido para 500 (mais sensível)
+            if max_amp < MIN_AMPLITUDE: 
+                return False
 
             freqs, psd = signal.welch(data, fs=params.framerate)
             music_ratio = np.sum(psd > (np.max(psd) * 0.01)) / len(psd)
+            
             logger.info(f"DSP Check: Amp={max_amp} | Ratio={music_ratio:.4f}")
             return music_ratio > THRESHOLD_RATIO
+
         except Exception as e:
             logger.error(f"Erro DSP: {e}")
             return False
@@ -110,12 +118,10 @@ class MoodeAudioMonitor:
             return None
             
         trimmed = path + "_trim.wav"
-        # Local fixo para você baixar via SCP: /home/alemser/test_ident.wav
         debug_path = os.path.join(os.path.expanduser("~"), "test_ident.wav")
         
         try:
-            logger.info("Processando áudio (Resample 16k + Filtros)...")
-            # Aumentamos o trim para 20 segundos de amostra para facilitar o match
+            logger.info("Processando áudio (Resample 16k)...")
             subprocess.run([
                 "sox", "-q", path, trimmed, 
                 "remix", "1", 
@@ -126,9 +132,8 @@ class MoodeAudioMonitor:
                 "trim", "5", "20" 
             ], check=True)
 
-            # --- VOLTA DA CÓPIA DE DEBUG ---
+            # Mantida a cópia para o seu notebook
             subprocess.run(["cp", trimmed, debug_path])
-            logger.info(f"Cópia de debug gerada em: {debug_path}")
 
             cmd = ["fpcalc", "-json", trimmed]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
@@ -149,8 +154,7 @@ class MoodeAudioMonitor:
             
             status = response.get("status")
             results = response.get("results", [])
-            logger.info(f"AcoustID Status: {status} | Resultados: {len(results)}")
-
+            
             if status == "ok" and results:
                 valid_results = [r for r in results if r.get("score", 0) > 0.05]
                 if valid_results:
@@ -167,6 +171,7 @@ class MoodeAudioMonitor:
                         if img_res.status_code == 200:
                             return {"title": title, "img": img_res.content}
             
+            logger.info(f"AcoustID Status: {status} | Sem correspondência.")
             return None
         except Exception as e:
             logger.error(f"Erro no Lookup: {e}")
@@ -190,7 +195,7 @@ class MoodeAudioMonitor:
             pygame.display.quit()
 
     def start(self):
-        logger.info("Monitor Moode Iniciado.")
+        logger.info("Monitor Moode Iniciado (Sensibilidade Restaurada).")
         while True:
             try:
                 if self.should_scan_analog():
@@ -200,7 +205,9 @@ class MoodeAudioMonitor:
                             art = self.get_artwork(path)
                             if art:
                                 self.display_image(art)
+                        
                         if os.path.exists(path): os.unlink(path)
+                
                 time.sleep(CHECK_INTERVAL)
             except KeyboardInterrupt: break
             except Exception as e:
